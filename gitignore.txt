@@ -1,0 +1,13 @@
+# Bundle payloads belong on Releases, not in the repo.
+**/emb1/analyzed/
+**/emb1/videos/
+**/emb1/*.gpickle
+**/emb1/*.tif
+**/emb1/*.tiff
+
+# OS / editor noise
+.DS_Store
+__pycache__/
+*.pyc
+.idea/
+.vscode/

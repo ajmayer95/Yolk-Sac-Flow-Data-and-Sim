@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bayesian Tile Distensibility Inference</title>
+<style>
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #18222d;
+  --muted: #647486;
+  --line: #d8e0e8;
+  --blue: #2868b7;
+  --red: #c74e45;
+  --green: #2c8a68;
+  --orange: #c27a22;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+header {
+  padding: 14px 18px;
+  background: #202b36;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+h1 { font-size: 17px; margin: 0; }
+main { padding: 14px; display: grid; gap: 14px; }
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 0.55fr); gap: 14px; }
+.gridTop { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 14px; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+canvas {
+  width: 100%;
+  height: 380px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+}
+.controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+label { color: var(--muted); font-size: 12px; display: grid; gap: 3px; }
+select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  padding: 0 8px;
+}
+.inlineControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0 10px;
+}
+.inlineControls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.inlineControls select { min-width: 130px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+th, td {
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  padding: 5px 6px;
+  white-space: nowrap;
+}
+th:first-child, td:first-child { text-align: left; }
+thead th { position: sticky; top: 0; background: #edf2f6; }
+.scroll { max-height: 380px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.meta { color: #dce6ef; font-size: 12px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.swatches { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.swatches span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; background: var(--c); }
+@media (max-width: 1050px) {
+  .grid2, .gridTop, .controls { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Bayesian Tile Distensibility Inference</h1>
+  <div class="meta" id="meta"></div>
+</header>
+<main>
+  <div class="gridTop">
+    <section>
+      <h2>Shared Distensibility Posterior Across All Tiles</h2>
+      <canvas id="globalCanvas"></canvas>
+      <div class="note">The blue curve is the shared-D posterior from multiplying tile H1 marginal likelihoods and applying one log-normal D prior. Best D values are posterior modes for all tiles, interior-only tiles, and periphery-only tiles.</div>
+    </section>
+    <section>
+      <h2>All Tile Posteriors Overlayed</h2>
+      <div class="inlineControls">
+        <label>Show
+          <select id="allFilter">
+            <option value="all">All tiles</option>
+            <option value="interior">Interior</option>
+            <option value="periphery">Periphery</option>
+          </select>
+        </label>
+      </div>
+      <canvas id="allCanvas"></canvas>
+      <div class="note">Each line is one tile's H1 marginal posterior, shown as -2 delta log posterior relative to that tile's mode. Reference lines show shared-D posterior modes for all, interior, and periphery tiles.</div>
+    </section>
+  </div>
+  <div class="grid2">
+    <section>
+      <h2>Selected Tile Posterior Overlay</h2>
+      <div class="controls">
+        <label>Tile 1<select id="sel0"></select></label>
+        <label>Tile 2<select id="sel1"></select></label>
+        <label>Tile 3<select id="sel2"></select></label>
+        <label>Tile 4<select id="sel3"></select></label>
+      </div>
+      <canvas id="selectedCanvas"></canvas>
+      <div class="swatches">
+        <span style="--c:#2868b7">Tile 1</span>
+        <span style="--c:#c74e45">Tile 2</span>
+        <span style="--c:#2c8a68">Tile 3</span>
+        <span style="--c:#c27a22">Tile 4</span>
+      </div>
+    </section>
+    <section>
+      <h2>Tile Summary</h2>
+      <div class="scroll"><table id="summaryTable"></table></div>
+    </section>
+  </div>
+</main>
+<script id="payload" type="application/json">{"defaults":{"observation_source":"measured_graph","tile_harmonics":[1],"D_min":1e-05,"D_max":0.1,"D_count":5,"objective":"bayes_h1_marginal_boundary","logD_prior_median":0.0015000000000000007,"logD_prior_tau":2.302585092994046,"boundary_sigma_pa":7.0,"sigma_h1_nl_s":0.012,"rescale_sigma_h1":true,"h1_weight_source":"h1_z","snr_q_floor":0.1,"relative_variance_floor":0.05},"globalProfile":[{"D":1e-05,"log_likelihood":13891.106544205859,"log_prior":-2.3676865838692702,"log_posterior":13888.73885762199,"posterior_prob":7.186128510162174e-07,"neg2_delta_logpost":28.291810097773123,"delta_chi2":28.291810097773123,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"all"},{"D":0.0001,"log_likelihood":13893.372706199409,"log_prior":-0.6915953248135883,"log_posterior":13892.681110874595,"posterior_prob":3.703341938307853e-05,"neg2_delta_logpost":20.40730359256122,"delta_chi2":20.40730359256122,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"all"},{"D":0.001,"log_likelihood":13902.900266736633,"log_prior":-0.015504065757907535,"log_posterior":13902.884762670876,"posterior_prob":0.9999619705897254,"neg2_delta_logpost":-0.0,"delta_chi2":-0.0,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"all"},{"D":0.01,"log_likelihood":13888.126329013523,"log_prior":-0.3394128067022262,"log_posterior":13887.78691620682,"posterior_prob":2.773780404639885e-07,"neg2_delta_logpost":30.195692928111384,"delta_chi2":30.195692928111384,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"all"},{"D":0.1,"log_likelihood":13789.73157818442,"log_prior":-1.663321547646544,"log_posterior":13788.068256636774,"posterior_prob":1.3671258076894844e-50,"neg2_delta_logpost":229.63301206820324,"delta_chi2":229.63301206820324,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"all"}],"groupProfiles":{"interior":[{"D":1e-05,"log_likelihood":13891.106544205859,"log_prior":-2.3676865838692702,"log_posterior":13888.73885762199,"posterior_prob":7.186128510162174e-07,"neg2_delta_logpost":28.291810097773123,"delta_chi2":28.291810097773123,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"interior"},{"D":0.0001,"log_likelihood":13893.372706199409,"log_prior":-0.6915953248135883,"log_posterior":13892.681110874595,"posterior_prob":3.703341938307853e-05,"neg2_delta_logpost":20.40730359256122,"delta_chi2":20.40730359256122,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"interior"},{"D":0.001,"log_likelihood":13902.900266736633,"log_prior":-0.015504065757907535,"log_posterior":13902.884762670876,"posterior_prob":0.9999619705897254,"neg2_delta_logpost":-0.0,"delta_chi2":-0.0,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"interior"},{"D":0.01,"log_likelihood":13888.126329013523,"log_prior":-0.3394128067022262,"log_posterior":13887.78691620682,"posterior_prob":2.773780404639885e-07,"neg2_delta_logpost":30.195692928111384,"delta_chi2":30.195692928111384,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"interior"},{"D":0.1,"log_likelihood":13789.73157818442,"log_prior":-1.663321547646544,"log_posterior":13788.068256636774,"posterior_prob":1.3671258076894844e-50,"neg2_delta_logpost":229.63301206820324,"delta_chi2":229.63301206820324,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","tile_group":"interior"}],"periphery":[]},"bestD":{"all":0.001,"interior":0.001,"periphery":null},"tileProfiles":{"22":[{"D":1e-05,"log_posterior":13888.73885762199,"posterior_prob":7.186128510162174e-07,"delta_chi2":28.291810097773123},{"D":0.0001,"log_posterior":13892.681110874595,"posterior_prob":3.703341938307853e-05,"delta_chi2":20.40730359256122},{"D":0.001,"log_posterior":13902.884762670876,"posterior_prob":0.9999619705897254,"delta_chi2":-0.0},{"D":0.01,"log_posterior":13887.78691620682,"posterior_prob":2.773780404639885e-07,"delta_chi2":30.195692928111384},{"D":0.1,"log_posterior":13788.068256636774,"posterior_prob":1.3671258076894844e-50,"delta_chi2":229.63301206820324}]},"tileLocation":{"22":"interior"},"summary":[{"tile_id":22,"ablation":"bayes_h1_marginal_boundary","harmonics":"H1","D_hat":0.001,"D_p025":0.00012246687757309414,"D_p500":0.0005499831357642759,"D_p975":0.0009774993939554576,"D_lo_lr3":0.001,"D_hi_lr3":0.001,"width_decades_lr3":0.0,"mode_at_grid_boundary":false,"max_neg2_delta_logpost":229.63301206820324,"log_likelihood_at_mode":13902.900266736633,"log_prior_at_mode":-0.015504065757907535,"log_posterior_at_mode":13902.884762670876,"sigma_h1_nL_s_at_mode":0.03561052406553019,"chi2_h1_red_at_mode":1.00000001902138,"n_obs":462,"n_h1":231,"n_boundary":35,"n_params_marginalized":70,"observation_source":"measured_graph","objective":"bayes_h1_marginal_boundary","weight_mode":"h1_z","location":"interior"}]}</script>
+<script>
+const data = JSON.parse(document.getElementById("payload").textContent);
+const colors = ["#2868b7", "#c74e45", "#2c8a68", "#c27a22"];
+const allColors = ["#8aa7c8", "#c8a18a", "#8bc0a9", "#b6a2ce", "#d8ba74", "#9cb5ba"];
+const tileIds = Object.keys(data.tileProfiles).map(Number).sort((a,b)=>a-b).map(String);
+
+function num(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "";
+  const x = Number(v);
+  if (x === 0) return "0";
+  if (Math.abs(x) >= 1000 || Math.abs(x) < 0.01) return x.toExponential(2);
+  return x.toFixed(3).replace(/\.?0+$/, "");
+}
+function byId(id) { return document.getElementById(id); }
+function setupSelectors() {
+  for (let i = 0; i < 4; i++) {
+    const sel = byId(`sel${i}`);
+    sel.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "None";
+    sel.appendChild(none);
+    for (const tid of tileIds) {
+      const opt = document.createElement("option");
+      opt.value = tid;
+      opt.textContent = tid.padStart(3, "0");
+      sel.appendChild(opt);
+    }
+    if (tileIds[i]) sel.value = tileIds[i];
+    sel.addEventListener("change", render);
+  }
+  byId("allFilter").addEventListener("change", render);
+}
+function canvasCtx(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(360, rect.width * dpr);
+  canvas.height = Math.max(260, rect.height * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return {ctx, w: canvas.width / dpr, h: canvas.height / dpr};
+}
+function clear(ctx,w,h) {
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = "white";
+  ctx.fillRect(0,0,w,h);
+}
+function axes(ctx,w,h,xlab,ylab) {
+  ctx.strokeStyle = "#d8e0e8";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(58, 18);
+  ctx.lineTo(58, h - 44);
+  ctx.lineTo(w - 18, h - 44);
+  ctx.stroke();
+  ctx.fillStyle = "#647486";
+  ctx.font = "12px sans-serif";
+  ctx.fillText(xlab, Math.max(64, w / 2 - 45), h - 15);
+  ctx.save();
+  ctx.translate(16, h / 2 + 52);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(ylab, 0, 0);
+  ctx.restore();
+}
+function logTickValues(xmin, xmax) {
+  const ticks = [];
+  const lo = Math.ceil(xmin);
+  const hi = Math.floor(xmax);
+  for (let e = lo; e <= hi; e++) ticks.push(Math.pow(10, e));
+  if (!ticks.length) {
+    ticks.push(Math.pow(10, xmin), Math.pow(10, xmax));
+  }
+  return ticks;
+}
+function linearTickValues(ymax) {
+  const rawStep = ymax / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const candidates = [1, 2, 5, 10].map(v => v * pow);
+  let step = candidates[candidates.length - 1];
+  for (const c of candidates) {
+    if (rawStep <= c) { step = c; break; }
+  }
+  const ticks = [];
+  for (let y = 0; y <= ymax + step * 0.5; y += step) {
+    ticks.push(y);
+  }
+  return ticks;
+}
+function drawTicks(ctx,w,h,xTicks,yTicks,sx,sy) {
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.strokeStyle = "#9aa8b5";
+  ctx.fillStyle = "#647486";
+  for (const xVal of xTicks) {
+    const x = sx(xVal);
+    if (x < 58 || x > w - 18) continue;
+    ctx.beginPath();
+    ctx.moveTo(x, h - 44);
+    ctx.lineTo(x, h - 38);
+    ctx.stroke();
+    ctx.fillText(num(xVal), x, h - 34);
+  }
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (const yVal of yTicks) {
+    const y = sy(yVal);
+    if (y < 18 || y > h - 44) continue;
+    ctx.beginPath();
+    ctx.moveTo(52, y);
+    ctx.lineTo(58, y);
+    ctx.stroke();
+    ctx.fillText(num(yVal), 48, y);
+  }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+function drawProfiles(canvas, series, opts={}) {
+  const {ctx,w,h} = canvasCtx(canvas);
+  clear(ctx,w,h);
+  axes(ctx,w,h,"D (1/Pa, log scale)","-2 delta log posterior");
+  const points = [];
+  for (const s of series) {
+    for (const p of s.rows) {
+      if (p.D > 0 && p.delta_chi2 !== null && p.delta_chi2 !== undefined) {
+        points.push([Math.log10(p.D), Number(p.delta_chi2)]);
+      }
+    }
+  }
+  if (!points.length) return;
+  const xmin = Math.min(...points.map(p => p[0]));
+  const xmax = Math.max(...points.map(p => p[0]));
+  const rawYmax = Math.max(...points.map(p => p[1]));
+  const cap = opts.yCap === undefined ? 12 : opts.yCap;
+  const ymax = Math.max(4, Math.min(cap, rawYmax));
+  const sx = D => 58 + (Math.log10(D) - xmin) / ((xmax - xmin) || 1) * (w - 82);
+  const sy = y => h - 44 - Math.min(y, ymax) / ymax * (h - 68);
+  drawTicks(ctx, w, h, logTickValues(xmin, xmax), linearTickValues(ymax),
+            sx, sy);
+  for (const y of [1, 3.84]) {
+    ctx.strokeStyle = y === 1 ? "#18222d" : "#647486";
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(58, sy(y));
+    ctx.lineTo(w - 18, sy(y));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#647486";
+    ctx.fillText(String(y), 62, sy(y) - 4);
+  }
+  const refs = opts.referenceLines || [];
+  for (const ref of refs) {
+    if (!ref || !ref.D) continue;
+    ctx.strokeStyle = ref.color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx(ref.D), 18);
+    ctx.lineTo(sx(ref.D), h - 44);
+    ctx.stroke();
+    if (ref.annotate) {
+      ctx.fillStyle = ref.color;
+      ctx.font = "12px sans-serif";
+      ctx.fillText(`${ref.label} = ${num(ref.D)}`,
+                   Math.min(w - 170, sx(ref.D) + 6), ref.y || 31);
+    }
+  }
+  for (const s of series) {
+    if (!s.rows.length) continue;
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle = s.color;
+    ctx.globalAlpha = s.alpha || 1;
+    ctx.lineWidth = s.width || 1.4;
+    ctx.beginPath();
+    s.rows.forEach((p, i) => {
+      const x = sx(p.D);
+      const y = sy(Number(p.delta_chi2));
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+    if (s.markers) {
+      for (const p of s.rows) {
+        ctx.beginPath();
+        ctx.arc(sx(p.D), sy(Number(p.delta_chi2)), 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (opts.legend || opts.referenceLegend) {
+    const legendPos = opts.legendPosition || "topRight";
+    const legendItemCount = (opts.legend ? series.length : 0) +
+                            (opts.referenceLegend ? refs.filter(ref => ref && ref.D).length : 0);
+    let y = legendPos === "bottomRight" ? h - Math.max(14, legendItemCount * 17) : 28;
+    ctx.font = "12px sans-serif";
+    if (opts.legend) {
+      for (const s of series) {
+        ctx.fillStyle = s.color;
+        ctx.fillRect(w - 156, y - 9, 10, 10);
+        ctx.fillStyle = "#18222d";
+        ctx.fillText(s.label, w - 140, y);
+        y += 17;
+      }
+    }
+    if (opts.referenceLegend) {
+      for (const ref of refs) {
+        if (!ref || !ref.D) continue;
+        ctx.strokeStyle = ref.color;
+        ctx.beginPath();
+        ctx.moveTo(w - 156, y - 5);
+        ctx.lineTo(w - 146, y - 5);
+        ctx.stroke();
+        ctx.fillStyle = "#18222d";
+        ctx.fillText(ref.label, w - 140, y);
+        y += 17;
+      }
+    }
+  }
+}
+function referenceLines(opts={}) {
+  const lines = [];
+  if (opts.global && data.bestD && data.bestD.all) {
+    lines.push({D: data.bestD.all, color: "#2c8a68", label: "all-tiles best D", annotate: opts.annotate, y: 31});
+  }
+  if (opts.interior && data.bestD && data.bestD.interior) {
+    lines.push({D: data.bestD.interior, color: "#6f63bd", label: "interior best D", annotate: opts.annotate, y: 47});
+  }
+  if (opts.periphery && data.bestD && data.bestD.periphery) {
+    lines.push({D: data.bestD.periphery, color: "#c27a22", label: "periphery best D", annotate: opts.annotate, y: 63});
+  }
+  return lines;
+}
+function renderGlobal() {
+  drawProfiles(byId("globalCanvas"), [{
+    label: "all tiles constant D",
+    rows: data.globalProfile,
+    color: "#2868b7",
+    width: 2,
+    markers: true
+  }], {
+    legend: true,
+    legendPosition: "bottomRight",
+    yCap: 12,
+    referenceLines: referenceLines({
+      global: true, interior: true, periphery: true,
+      annotate: true
+    })
+  });
+}
+function renderAll() {
+  const filter = byId("allFilter").value || "all";
+  const shown = tileIds.filter(tid => {
+    if (filter === "all") return true;
+    return data.tileLocation[tid] === filter;
+  });
+  const series = shown.map((tid, i) => ({
+    label: `tile ${tid}`,
+    rows: data.tileProfiles[tid] || [],
+    color: allColors[i % allColors.length],
+    alpha: 0.42,
+    width: 1
+  }));
+  drawProfiles(byId("allCanvas"), series, {
+    yCap: 12,
+    referenceLines: referenceLines({
+      global: true, interior: true, periphery: true,
+      annotate: true
+    })
+  });
+}
+function renderSelected() {
+  const selected = [];
+  for (let i = 0; i < 4; i++) {
+    const tid = byId(`sel${i}`).value;
+    if (!tid) continue;
+    selected.push({
+      label: `tile ${tid}`,
+      rows: data.tileProfiles[tid] || [],
+      color: colors[i],
+      width: 2,
+      markers: true
+    });
+  }
+  drawProfiles(byId("selectedCanvas"), selected, {legend: true, yCap: 12});
+  renderTable(selected.map(s => s.label.replace("tile ", "")));
+}
+function renderTable(selectedIds) {
+  const rows = data.summary
+    .filter(r => !selectedIds.length || selectedIds.includes(String(r.tile_id)))
+    .sort((a,b) => Number(a.tile_id) - Number(b.tile_id));
+  const cols = [
+    ["tile_id", "tile"],
+    ["location", "location"],
+    ["D_hat", "D_hat"],
+    ["D_p025", "D 2.5%"],
+    ["D_p975", "D 97.5%"],
+    ["width_decades_lr3", "width lr3"],
+    ["chi2_h1_red_at_mode", "H1 red chi2"],
+    ["sigma_h1_nL_s_at_mode", "sigma H1"],
+    ["mode_at_grid_boundary", "edge mode"],
+    ["n_h1", "n h1"],
+    ["n_boundary", "n bnd"]
+  ];
+  const cell = (r, key) => {
+    const value = r[key];
+    if (key === "tile_id" || key === "location") return value ?? "";
+    return num(value);
+  };
+  const head = `<thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr></thead>`;
+  const body = rows.map(r => `<tr>${cols.map(c => `<td>${cell(r, c[0])}</td>`).join("")}</tr>`).join("");
+  byId("summaryTable").innerHTML = head + `<tbody>${body}</tbody>`;
+}
+function render() {
+  renderGlobal();
+  renderAll();
+  renderSelected();
+}
+function setup() {
+  byId("meta").textContent = `objective=Bayes H1 marginal boundary; source=measured graph; all mode D=${num(data.bestD.all)}; interior mode D=${num(data.bestD.interior)}; periphery mode D=${num(data.bestD.periphery)}; tiles=${tileIds.length}`;
+  setupSelectors();
+  window.addEventListener("resize", render);
+  render();
+}
+setup();
+</script>
+</body>
+</html>

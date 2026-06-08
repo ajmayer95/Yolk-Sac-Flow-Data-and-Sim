@@ -1,0 +1,6 @@
+D,chi2,delta_chi2,objective,observation_source,tile_group,weight_mode
+1e-06,4056.0328765436943,0.0,weighted_least_squares,measured_graph,periphery,sigma
+1.778279410038923e-05,4058.061914895891,2.029038352196494,weighted_least_squares,measured_graph,periphery,sigma
+0.00031622776601683794,4093.285518797238,37.252642253543854,weighted_least_squares,measured_graph,periphery,sigma
+0.005623413251903491,4577.798361678889,521.7654851351945,weighted_least_squares,measured_graph,periphery,sigma
+0.1,6598.81429780344,2542.781421259746,weighted_least_squares,measured_graph,periphery,sigma

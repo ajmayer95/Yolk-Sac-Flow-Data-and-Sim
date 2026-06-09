@@ -20,6 +20,13 @@ dissipation filter, edge value labels), download `pertile_code_v0.3.0.zip`
 from the release and unzip it over your existing `PerTileFlow/`
 folder — 94 KB drop-in, no re-download of the full bundle needed.
 
+**Want a coding agent to apply the whole migration for you?**  Paste
+the contents of [`AGENT_PROMPT.md`](AGENT_PROMPT.md) into Codex,
+Claude, Cursor, or any other agent.  Self-contained, walks the agent
+through downloading the canonical graph, dropping in the updated
+code, patching custom reader scripts (`scripts/inspect_tile.py` etc.)
+with the canonical→legacy fallback chain, and running a smoke test.
+
 ## Bundles
 
 | Stage | Folder | v0.2.0 full bundle | v0.3.0 canonical-graph drop-in |

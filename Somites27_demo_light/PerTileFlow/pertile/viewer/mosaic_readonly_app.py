@@ -39,9 +39,27 @@ from matplotlib import colors as mcolors
 # Default fields to expose in the dropdown (subset of what PIV stores).
 # Order matters — first ones are most useful.
 DEFAULT_FIELDS: List[str] = [
-    'mean_Q', 'amp_Q', 'PI', 'phase', 'snr_pulse', 'snr_f0',
-    'f0_hz', 'v_max',
-    # geometry from edge attrs
+    # PIV pipeline is the live truth (kymo pipeline retired).  All
+    # measurement-derived fields use the `_piv` aggregation; SNR uses
+    # the two fit-residual metrics added in the 2026-06-04 reanalysis.
+    'mean_Q_piv', 'amp_Q_piv', 'PI_piv', 'phase_piv',
+    # H2 amplitude — useful alongside amp_Q_piv for distortion analyses.
+    'amp_Q_h2_piv',
+    # SNRs from fit-residual power (dB):
+    #   harm-fit = full Wiki SNR (DC + AC as signal)   → mean Q inference
+    #   ac-fit   = AC-only SNR (drops DC from signal)  → cardiac waveform
+    'snr_harm_fit_db_piv', 'snr_ac_fit_db_piv',
+    # Waveform-shape decomposition (added by qt_refit, June 2026):
+    #   pulse_frac = AC / (DC + AC) — overall pulsatility
+    #   H1_frac    = ½|Q₁|² / P_osc  — fundamental's share of AC content
+    #   H2_frac    = ½|Q₂|² / P_osc  — second harmonic's share
+    # Higher harmonics (amp_Q_h3_piv, phase_h2/h3_piv, H3_frac_piv) are
+    # written to edges by qt_refit but kept out of this default list to
+    # avoid bloating the dropdown.  Add them here if a specific analysis
+    # needs them on hover/color.
+    'pulse_frac_piv', 'H1_frac_piv', 'H2_frac_piv',
+    'f0_hz_piv', 'v_max_piv',
+    # geometry from edge attrs (pipeline-neutral)
     'radius', 'length',
     # viscous dissipation Φ = r·L·⟨Q²⟩ (W).  Available for both
     # measured (precomputed from PIV Q_t + geometry) and sim (from
@@ -49,7 +67,7 @@ DEFAULT_FIELDS: List[str] = [
     'dissipation',
 ]
 # Categorical field handled specially (discrete per-class colors):
-CATEGORICAL_FIELDS = ['quality_tier', 'harmonic_class']
+CATEGORICAL_FIELDS = ['quality_tier_piv', 'harmonic_class']
 # Per-edge simulation outputs (in-memory only, written by
 # `_run_simulation`, never persisted to the gpickle).  Stored on edges
 # under the keys below; the Source toggle in the View tab decides
@@ -71,14 +89,26 @@ PROPERTY_DEFS = [
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
     ('phase',         'Phase ∠·',             True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
-    ('resolution',    'Resolution (Z = amp/SE)', True,
+    # (Resolution Z = amp/SE removed — same ranking as SNR (dB) for
+    # fixed-N, so redundant from the user's perspective.  Z is still
+    # computed internally by _harmonic_fit_full and used by the
+    # Resolved-harmonic-class categorical view, which is a detection-
+    # significance question — the right place for Z.)
+    # Per-harmonic SNR from fit_harmonics — populated on canonical
+    # graphs as Q_DC_snr_db / Q_H1_snr_db / Q_H2_snr_db / Q_H3_snr_db.
+    # Useful for filtering down to vessels with clean cardiac content
+    # at a specific harmonic.
+    ('snr',           'SNR (dB)',             True,
         {('measured', 'Q')}),
     # `mean` dropped — redundant with `magnitude @ DC` for measured Q
     # and sim Q (both anchored to |Q̄| ≥ 0).  Sim P loses access to the
     # signed gauge DC, which is fine — pressure_drop carries the
     # meaningful absolute differential and gauge polarity isn't a daily
     # diagnostic.
-    ('PI',            'Pulsatility index',    False,
+    # PI per harmonic: 2·|Q_Hk| / |Q_DC| (Gosling-style peak-to-peak/mean).
+    # PI@DC is undefined (returned None).  PI@H1 is the classic PI;
+    # PI@H2 / PI@H3 measure higher-harmonic content as a fraction of mean.
+    ('PI',            'Pulsatility index',    True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
     # Heart-rate fundamental.  Measured-Q reads the top-level `f0_hz`
     # attr set during analysis (== best measurement's f0); sim reads
@@ -86,13 +116,16 @@ PROPERTY_DEFS = [
     # fit locked onto an aliased peak or a slightly different rate.
     ('frequency',     'Fundamental f₀ (Hz)',  False,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
-    # Per-vessel "is this signal-rich?" — Var(fit)/Var(resid) from the
-    # K=3 harmonic fit on the kymograph Q(t).  Biased AGAINST near-
-    # steady vessels (DC contributes 0 to Var(fit)) — high for arteries,
-    # low for clean venous flow.  Distinct from "is this reliable?",
-    # which is answered by Z_DC (available as Resolution @ DC).
-    ('total_snr',     'Total SNR (Var(fit)/Var(resid))', False,
+    # Aggregate canonical SNRs (in dB).  These match the fit_harmonics
+    # convention written to per-tile measurements_piv entries and the
+    # canonical edge attrs (snr_ac_fit_db, snr_harm_fit_db).
+    ('snr_ac',        'SNR_AC (dB) — H1+H2+H3', False,
         {('measured', 'Q')}),
+    ('snr_total',     'SNR_total (dB) — DC+AC', False,
+        {('measured', 'Q')}),
+    # (Var(fit)/Var(resid) total_snr removed — redundant with the dB
+    # SNR family above.  The underlying `_h_total_snr` field is still
+    # cached for the percentile-filter fallback on legacy graphs.)
     ('dissipation',   'Dissipation Φ',        False,
         {('measured', 'Q'), ('sim', 'Q')}),
     ('drop',          'Pressure drop',        False,
@@ -146,6 +179,7 @@ SIM_FIELD_MAP: Dict[str, str] = {
     'dissipation':     '_sim_tmp_dissipation', # from result.dissipation
     'pressure_mean':   '_sim_tmp_pressure_mean', # sim-only, P_mid,DC (Pa)
     'pressure_amp':    '_sim_tmp_pressure_amp',  # sim-only, |P_mid,H1| (Pa)
+    'pressure_amp_H2': '_sim_tmp_pressure_amp_H2', # sim-only, |P_mid,H2| (Pa)
     'pressure_phase':  '_sim_tmp_phase_P',       # sim-only
     'pressure_drop':   '_sim_tmp_pressure_drop', # sim-only, |P_u_DC − P_v_DC| (Pa)
     # Geometry overrides — populated only when "Uniform conductance" is
@@ -156,7 +190,7 @@ SIM_FIELD_MAP: Dict[str, str] = {
     'length':          '_sim_tmp_length',
 }
 # Fields the comparison plot should treat as pressure (P-mode).
-SIM_PRESSURE_FIELDS = {'pressure_mean', 'pressure_amp',
+SIM_PRESSURE_FIELDS = {'pressure_mean', 'pressure_amp', 'pressure_amp_H2',
                        'pressure_phase'}
 # Storage-only keys (not in any dropdown).
 SIM_INTERNAL_KEYS: List[str] = [
@@ -342,29 +376,56 @@ NO_DATA_COLOR = '#555555'
 
 
 def _measurement_usable(m: Optional[dict]) -> bool:
-    """True if a PIV measurement passed PIV's own gates (tier ≠ X) and
-    has a valid fit.  This is what the user thinks of as a 'real
-    measurement' vs 'garbage'."""
+    """True if a PIV measurement is a 'real' (non-garbage) record.
+
+    Schema-agnostic: works on both legacy (quality_tier present) and
+    canonical (quality_tier dropped) graphs.
+
+    On canonical: usable if Q_t exists and Q_H1_snr_db is finite.
+    On legacy:    usable if quality_tier ≠ 'X' and fit_success.
+    """
     if m is None:
         return False
     if not m.get('fit_success', True):
         return False
-    if m.get('quality_tier', 'X') == 'X':
+    # Legacy gate
+    if 'quality_tier' in m:
+        if m['quality_tier'] == 'X':
+            return False
+        return True
+    # Canonical gate: require Q_t + finite H1 SNR
+    if m.get('Q_t') is None:
         return False
+    snr = m.get('Q_H1_snr_db', m.get('snr_h1_db'))
+    if snr is None or not np.isfinite(float(snr)):
+        # Fallback: accept anything that has Q_t.  The precompute will
+        # try a refit and reject downstream if it fails.
+        return True
     return True
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
 def _best_measurement(piv_list: Optional[list]) -> Optional[dict]:
-    """Pick the highest-tier, highest-SNR measurement for one edge."""
+    """Pick the highest-SNR measurement for one edge.
+
+    Schema-agnostic ranking — prefers canonical Q_H1_snr_db when present,
+    falls back to (quality_tier, snr_f0) on legacy graphs.
+    """
     if not piv_list:
         return None
     candidates = [m for m in piv_list if m.get('fit_success', True)]
     if not candidates:
         return None
-    return max(candidates,
-               key=lambda m: (QUALITY_RANK.get(m.get('quality_tier', 'X'), 0),
-                              m.get('snr_f0', 0) or 0))
+    def _rank(m):
+        # Canonical: just H1 SNR (highest wins)
+        snr_h1 = m.get('Q_H1_snr_db', m.get('snr_h1_db'))
+        if snr_h1 is not None and np.isfinite(float(snr_h1)):
+            return (1, float(snr_h1))   # tier 1 = canonical
+        # Legacy: tier + snr_f0
+        return (0,
+                QUALITY_RANK.get(m.get('quality_tier', 'X'), 0),
+                m.get('snr_f0', 0) or 0)
+    return max(candidates, key=_rank)
 
 
 def _resolve_edge_field(G, u, v, field: str,
@@ -436,6 +497,8 @@ class ReadOnlyMosaicViewer:
         initial_field: str = 'mean_Q',
         cache_harmonic_class: bool = True,
         force_recompute_harmonic_class: bool = False,
+        rotate_cw: bool = False,
+        rotate_ccw: bool = False,
     ):
         self.graph_path = Path(graph_path)
         self.tiff_path = Path(tiff_path) if tiff_path else None
@@ -444,6 +507,10 @@ class ReadOnlyMosaicViewer:
         self.video_pattern = video_pattern
         self.cache_harmonic_class = bool(cache_harmonic_class)
         self.force_recompute_harmonic_class = bool(force_recompute_harmonic_class)
+        self.rotate_cw = bool(rotate_cw)
+        self.rotate_ccw = bool(rotate_ccw)
+        if self.rotate_cw and self.rotate_ccw:
+            raise ValueError("Pass at most one of --rotate-cw / --rotate-ccw.")
         self.G = self._load_graph()
         self.mosaic = self._load_tiff() if self.tiff_path else None
         self.tiles = self._load_tile_positions() if self.tile_positions_path else {}
@@ -497,6 +564,12 @@ class ReadOnlyMosaicViewer:
         self._tile_labels_layer = None
         self.show_tile_boundaries = False
         self.show_tile_labels = False
+        # Edge value labels — show the current property value at each
+        # edge's midpoint.  Hidden by default and ALSO requires a single
+        # tile to be selected (Tile filter ≠ "All tiles") to render —
+        # otherwise the labels overlap into clutter at mosaic scale.
+        self.show_edge_labels = False
+        self._edge_labels_layer = None
         # Network-wide reliability filtering is intentionally out of the
         # UI for now — the cached per-harmonic Z layers (`_h_Z_DC`,
         # `_h_Z_HN`) are the right basis for a future continuous,
@@ -524,6 +597,13 @@ class ReadOnlyMosaicViewer:
         # Cached per-refresh threshold so we compute the percentile
         # once per call to `_refresh_edges` instead of per edge.
         self._cached_total_snr_threshold: Optional[float] = None
+        # Percentile threshold on per-edge viscous dissipation Φ (W).
+        # Hides the bottom X % of edges by network-wide `_meas_dissipation`.
+        # 0 = no filtering, default.  Cached threshold + stats are
+        # invalidated when the filter value or graph changes.
+        self.dissipation_pct_filter: float = 0.0
+        self._cached_dissipation_threshold: Optional[float] = None
+        self._cached_dissipation_stats: Optional[Dict[str, float]] = None
         # Edges queued for the side-by-side comparison plot.  Each
         # entry is (u, v); duplicates ignored.  Cleared via the
         # "Clear comparison" button or when the user explicitly resets.
@@ -604,13 +684,30 @@ class ReadOnlyMosaicViewer:
             return None  # no measurement on the filtered tile for this edge
 
         if prop == 'PI':
+            # Per-harmonic PI_k = 2·|Q_Hk| / |Q_DC|.  DC slot undefined.
+            k_idx_pi = HARMONIC_KEYS.index(self.current_harmonic)
+            if k_idx_pi == 0:
+                return None
             a0 = abs(float(entry.get('amp_DC', 0.0) or 0.0))
-            amp1 = float(entry.get('amp_H1', 0.0) or 0.0)
+            amp_k = float(entry.get(f'amp_H{k_idx_pi}', 0.0) or 0.0)
             if a0 < 1e-15:
                 return None
-            return 2.0 * amp1 / a0
+            return 2.0 * amp_k / a0
         if prop == 'total_snr':
             return _safe_float(entry.get('total_snr'))
+        if prop == 'snr_ac':
+            # Read this tile's measurement directly (canonical field).
+            tile_id = self.current_tile_filter
+            for mm in (d.get('measurements_piv') or []):
+                if mm.get('tile_id') == tile_id:
+                    return _safe_float(mm.get('snr_ac_fit_db'))
+            return None
+        if prop == 'snr_total':
+            tile_id = self.current_tile_filter
+            for mm in (d.get('measurements_piv') or []):
+                if mm.get('tile_id') == tile_id:
+                    return _safe_float(mm.get('snr_harm_fit_db'))
+            return None
         if prop == 'harmonic_class':
             snrs = {'DC': float(entry.get('Z_DC', 0.0) or 0.0),
                     'H1': float(entry.get('Z_H1', 0.0) or 0.0),
@@ -639,6 +736,16 @@ class ReadOnlyMosaicViewer:
             if k_idx == 0:
                 return _safe_float(entry.get('Z_DC'))
             return _safe_float(entry.get(f'Z_H{k_idx}'))
+        if prop == 'snr':
+            # Per-harmonic SNR from THIS tile's measurement (canonical
+            # fields Q_DC_snr_db / Q_Hk_snr_db on the per-tile entry).
+            tile_id = self.current_tile_filter
+            for mm in (d.get('measurements_piv') or []):
+                if mm.get('tile_id') == tile_id:
+                    if k_idx == 0:
+                        return _safe_float(mm.get('Q_DC_snr_db'))
+                    return _safe_float(mm.get(f'Q_H{k_idx}_snr_db'))
+            return None
         return None
 
     # ── Field resolver (4-selector model) ─────────────────────────────
@@ -677,28 +784,55 @@ class ReadOnlyMosaicViewer:
         # 'mean' was dropped — use Magnitude @ DC for the |Q̄| / |P̄|
         # equivalent.
         if prop == 'PI':
+            # Per-harmonic Gosling-style PI: PI_k = 2·|Q_Hk| / |Q_DC|.
+            # k_idx = 0 (DC) is undefined; H1 is classic PI.
+            k_idx_pi = HARMONIC_KEYS.index(self.current_harmonic)
+            if k_idx_pi == 0:
+                return None  # PI at DC is undefined
             if src == 'measured' and qty == 'Q':
                 m = _best_measurement(d.get('measurements_piv'))
                 if m is None:
                     return None
                 try:
-                    val = float(m.get('PI', float('nan')))
+                    # Classic legacy 'PI' field is H1-only; only honour
+                    # it when the user asks for H1.
+                    if k_idx_pi == 1:
+                        pi_legacy = m.get('PI')
+                        if (pi_legacy is not None
+                                and np.isfinite(float(pi_legacy))):
+                            return float(pi_legacy)
+                    amp_k = m.get(f'Q_H{k_idx_pi}_amp')
+                    dc = m.get('Q_DC')
+                    if (amp_k is None or dc is None
+                            or float(dc) == 0):
+                        return None
+                    val = 2.0 * abs(float(amp_k)) / abs(float(dc))
+                    return val if np.isfinite(val) else None
                 except (TypeError, ValueError):
                     return None
-                return val if np.isfinite(val) else None
             if src == 'sim' and qty == 'Q':
-                return _safe_float(d.get('_sim_tmp_PI'))
+                # Sim path: derive PI_k from cached harmonics if available,
+                # otherwise fall back to the cached H1-only PI.
+                h = d.get('_sim_tmp_harmonics')
+                if h is not None and k_idx_pi < len(h):
+                    dc = abs(float(h[0].real))
+                    if dc < 1e-30:
+                        return None
+                    return 2.0 * float(abs(h[k_idx_pi])) / dc
+                if k_idx_pi == 1:
+                    return _safe_float(d.get('_sim_tmp_PI'))
+                return None
             if src == 'sim' and qty == 'P':
                 p = d.get('_sim_tmp_p_harmonics')
-                if p is None or len(p) < 2:
+                if p is None or k_idx_pi >= len(p):
                     return None
                 p_dc = abs(float(p[0].real))
                 if not np.isfinite(p_dc) or p_dc < 1e-12:
                     return None
-                amp1 = float(abs(p[1]))
-                if not np.isfinite(amp1):
+                amp_k = float(abs(p[k_idx_pi]))
+                if not np.isfinite(amp_k):
                     return None
-                return 2.0 * amp1 / p_dc
+                return 2.0 * amp_k / p_dc
             return None
         if prop == 'dissipation':
             if src == 'measured':
@@ -727,6 +861,12 @@ class ReadOnlyMosaicViewer:
             # Cached during _precompute_harmonic_classes; only present
             # for measured Q edges that had a usable Q_t to fit.
             return _safe_float(d.get('_h_total_snr'))
+        if prop == 'snr_ac':
+            # AC-total SNR in dB: P(H1+H2+H3) / MS_BL.  Canonical edge attr.
+            return _safe_float(d.get('snr_ac_fit_db'))
+        if prop == 'snr_total':
+            # DC+AC SNR in dB: P(DC+H1+H2+H3) / MS_BL.  Canonical edge attr.
+            return _safe_float(d.get('snr_harm_fit_db'))
         if prop == 'frequency':
             if src == 'sim':
                 return _safe_float(d.get('_sim_tmp_f0_hz'))
@@ -750,9 +890,10 @@ class ReadOnlyMosaicViewer:
                         m = _best_measurement(d.get('measurements_piv'))
                         if m is None:
                             return None
+                        # Canonical (Q_DC) → legacy (mean_Q) fallback
+                        dc = m.get('Q_DC', m.get('mean_Q', float('nan')))
                         try:
-                            return abs(float(m.get('mean_Q',
-                                                    float('nan'))))
+                            return abs(float(dc))
                         except (TypeError, ValueError):
                             return None
                     try:
@@ -796,6 +937,13 @@ class ReadOnlyMosaicViewer:
                 if k_idx == 0:
                     return _safe_float(d.get('_h_Z_DC'))
                 return _safe_float(d.get(f'_h_Z_H{k_idx}'))
+            return None
+        if prop == 'snr':
+            # Per-harmonic SNR — canonical (top-level) edge attrs.
+            if src == 'measured' and qty == 'Q':
+                if k_idx == 0:
+                    return _safe_float(d.get('Q_DC_snr_db'))
+                return _safe_float(d.get(f'Q_H{k_idx}_snr_db'))
             return None
         return None
 
@@ -1318,10 +1466,11 @@ class ReadOnlyMosaicViewer:
         # the Source toggle, not the dropdown.
         if getattr(self, '_sim_active', False):
             sim_only_checks = [
-                ('pressure_mean',  '_sim_tmp_pressure_mean'),
-                ('pressure_amp',   '_sim_tmp_pressure_amp'),
-                ('pressure_phase', '_sim_tmp_phase_P'),
-                ('pressure_drop',  '_sim_tmp_pressure_drop'),
+                ('pressure_mean',   '_sim_tmp_pressure_mean'),
+                ('pressure_amp',    '_sim_tmp_pressure_amp'),
+                ('pressure_amp_H2', '_sim_tmp_pressure_amp_H2'),
+                ('pressure_phase',  '_sim_tmp_phase_P'),
+                ('pressure_drop',   '_sim_tmp_pressure_drop'),
             ]
             for display_name, edge_key in sim_only_checks:
                 for _, _, d in self.G.edges(data=True):
@@ -1330,32 +1479,6 @@ class ReadOnlyMosaicViewer:
         return found
 
     # ── napari + Qt UI ─────────────────────────────────────────────────
-    def _add_points_compat(self, *args, **kwargs):
-        """Add a napari points layer across edge_*/border_* API versions."""
-        variants = [kwargs]
-        if 'edge_color' in kwargs or 'edge_width' in kwargs:
-            border_kwargs = dict(kwargs)
-            if 'edge_color' in border_kwargs:
-                border_kwargs['border_color'] = border_kwargs.pop('edge_color')
-            if 'edge_width' in border_kwargs:
-                border_kwargs['border_width'] = border_kwargs.pop('edge_width')
-            variants.append(border_kwargs)
-        if 'border_color' in kwargs or 'border_width' in kwargs:
-            edge_kwargs = dict(kwargs)
-            if 'border_color' in edge_kwargs:
-                edge_kwargs['edge_color'] = edge_kwargs.pop('border_color')
-            if 'border_width' in edge_kwargs:
-                edge_kwargs['edge_width'] = edge_kwargs.pop('border_width')
-            variants.append(edge_kwargs)
-
-        last_exc = None
-        for variant in variants:
-            try:
-                return self.viewer.add_points(*args, **variant)
-            except TypeError as exc:
-                last_exc = exc
-        raise last_exc
-
     def _setup_viewer(self):
         import napari
         title = f"Mosaic (read-only) — {self.graph_path.name}"
@@ -1371,7 +1494,7 @@ class ReadOnlyMosaicViewer:
         # .data + .edge_color update on an initially-empty layer.
         self._edges_layer = None
         # Nodes layer (hidden by default)
-        self._nodes_layer = self._add_points_compat(
+        self._nodes_layer = self.viewer.add_points(
             np.empty((0, 2)), size=4, face_color='white',
             edge_color='black', name='Nodes', visible=False,
         )
@@ -1380,13 +1503,13 @@ class ReadOnlyMosaicViewer:
         # cyan click marker so both stay visible when the user clicks an
         # edge that's already in the comparison set.
         try:
-            self._comparison_marker_layer = self._add_points_compat(
+            self._comparison_marker_layer = self.viewer.add_points(
                 np.empty((0, 2)), size=36, face_color='transparent',
                 border_color='#1f77b4', border_width=0.35,
                 name='Comparison set', symbol='ring', opacity=0.95,
             )
         except TypeError:
-            self._comparison_marker_layer = self._add_points_compat(
+            self._comparison_marker_layer = self.viewer.add_points(
                 np.empty((0, 2)), size=36, face_color='transparent',
                 edge_color='#1f77b4', edge_width=0.35,
                 name='Comparison set', symbol='ring', opacity=0.95,
@@ -1398,13 +1521,13 @@ class ReadOnlyMosaicViewer:
         # and new napari API names; if your napari is too old to accept
         # `border_width`, swap it for `edge_width=0.2`.
         try:
-            self._click_marker_layer = self._add_points_compat(
+            self._click_marker_layer = self.viewer.add_points(
                 np.empty((0, 2)), size=24, face_color='transparent',
                 border_color='cyan', border_width=0.2,
                 name='Selected', symbol='ring',
             )
         except TypeError:
-            self._click_marker_layer = self._add_points_compat(
+            self._click_marker_layer = self.viewer.add_points(
                 np.empty((0, 2)), size=24, face_color='transparent',
                 edge_color='cyan', edge_width=0.2,
                 name='Selected', symbol='ring',
@@ -1417,7 +1540,7 @@ class ReadOnlyMosaicViewer:
                     self.G.nodes[n]['x']]
         if self._source_nodes:
             src_pts = np.array([_to_display(n) for n in self._source_nodes])
-            self._source_layer = self._add_points_compat(
+            self._source_layer = self.viewer.add_points(
                 src_pts, size=18, face_color='#d62728',
                 border_color='white',
                 name='Arterial boundary (A)',
@@ -1427,7 +1550,7 @@ class ReadOnlyMosaicViewer:
             )
         if self._sink_nodes:
             snk_pts = np.array([_to_display(n) for n in self._sink_nodes])
-            self._sink_layer = self._add_points_compat(
+            self._sink_layer = self.viewer.add_points(
                 snk_pts, size=18, face_color='#1f77b4',
                 border_color='white',
                 name='Venous boundary (V)',
@@ -1447,10 +1570,35 @@ class ReadOnlyMosaicViewer:
         def _on_click(viewer, event):
             if event.type != 'mouse_press' or len(event.position) < 2:
                 return
-            row, col = event.position[-2], event.position[-1]
+            row, col = self._world_to_mosaic_data(event.position)
             if self._inspect_nearest_boundary_node(col, row):
                 return
             self._inspect_nearest_edge(col, row)
+
+    def _world_to_mosaic_data(self, world_pos):
+        """Convert a napari world position (event.position) to mosaic
+        data coordinates (row, col).
+
+        With no rotation active, world == data for the Mosaic layer
+        (identity affine), so this just returns the last two elements
+        of world_pos.  With --rotate-cw/--rotate-ccw, the Mosaic layer
+        carries an affine whose inverse maps the clicked world position
+        back to the unrotated mosaic row/col — that's where the graph
+        node coords live, so hit-testing against `_edge_midpoints`
+        works correctly.
+        """
+        ref_layer = None
+        for name in ('Mosaic', 'Nodes', 'Edges'):
+            if name in self.viewer.layers:
+                ref_layer = self.viewer.layers[name]
+                break
+        if ref_layer is None:
+            return float(world_pos[-2]), float(world_pos[-1])
+        try:
+            data_pos = ref_layer.world_to_data(world_pos)
+        except Exception:
+            return float(world_pos[-2]), float(world_pos[-1])
+        return float(data_pos[-2]), float(data_pos[-1])
 
     def _setup_panel(self):
         from qtpy.QtWidgets import (
@@ -1622,24 +1770,81 @@ class ReadOnlyMosaicViewer:
         tspct_row = QWidget()
         tspct_lay = QHBoxLayout(tspct_row)
         tspct_lay.setContentsMargins(0, 0, 0, 0)
-        tspct_lay.addWidget(QLabel('Hide bottom % by total_snr:'))
+        tspct_lay.addWidget(QLabel('Hide bottom % by SNR_H1 (dB):'))
         self._tspct_filter_spin = QDoubleSpinBox()
         self._tspct_filter_spin.setRange(0.0, 99.0)
         self._tspct_filter_spin.setDecimals(1)
         self._tspct_filter_spin.setSingleStep(1.0)
         self._tspct_filter_spin.setValue(0.0)
         self._tspct_filter_spin.setToolTip(
-            "Hide edges in the bottom X % of total_snr "
-            "(Var(fit)/Var(resid))\n"
-            "across the WHOLE network.  Threshold is always computed\n"
-            "from graph-wide best-of-edge values — independent of the\n"
-            "Tile filter setting.  Only affects measured-Q fields.\n"
+            "Hide edges in the bottom X % of SNR_H1 (dB) — the canonical\n"
+            "per-edge cardiac-fundamental SNR (Q_H1_snr_db).\n"
+            "Threshold is computed from the GRAPH-WIDE distribution of\n"
+            "best-of-edge values, so it's stable regardless of Tile\n"
+            "filter.  Falls back to legacy Var(fit)/Var(resid) on graphs\n"
+            "without canonical SNR fields.  Only affects measured-Q.\n"
             "0 = no filtering (default).")
         self._tspct_filter_spin.valueChanged.connect(
             self._on_total_snr_pct_change)
         tspct_lay.addWidget(self._tspct_filter_spin)
         tspct_lay.addStretch(1)
         fld_lay.addWidget(tspct_row)
+
+        # Percentile filter on viscous dissipation Φ — gates measured-Q
+        # fields by network-wide percentile of `_meas_dissipation` (W).
+        # Tooltip shows the actual distribution so the user knows what
+        # cut they're applying in absolute terms.  0 = no filtering.
+        diss_row = QWidget()
+        diss_lay = QHBoxLayout(diss_row)
+        diss_lay.setContentsMargins(0, 0, 0, 0)
+        diss_lay.addWidget(QLabel('Hide bottom % by dissipation Φ:'))
+        self._dissipation_filter_spin = QDoubleSpinBox()
+        self._dissipation_filter_spin.setRange(0.0, 99.0)
+        self._dissipation_filter_spin.setDecimals(1)
+        self._dissipation_filter_spin.setSingleStep(1.0)
+        self._dissipation_filter_spin.setValue(0.0)
+        # Compute the network-wide dissipation distribution to populate
+        # the tooltip range.  Updated once at startup; not re-derived
+        # because the field is precomputed and doesn't change post-load.
+        _diss_vals = [
+            float(dd.get('_meas_dissipation'))
+            for _, _, dd in self.G.edges(data=True)
+            if dd.get('_meas_dissipation') is not None
+                and np.isfinite(dd.get('_meas_dissipation'))
+                and float(dd.get('_meas_dissipation')) > 0
+        ]
+        if _diss_vals:
+            arr = np.asarray(_diss_vals)
+            self._cached_dissipation_stats = dict(
+                n=int(arr.size), min=float(arr.min()),
+                p10=float(np.percentile(arr, 10)),
+                p50=float(np.percentile(arr, 50)),
+                p90=float(np.percentile(arr, 90)),
+                max=float(arr.max()),
+            )
+            _s = self._cached_dissipation_stats
+            tooltip = (
+                "Hide edges in the bottom X % of viscous dissipation Φ\n"
+                "(W; computed as Φ = r·L·⟨Q²⟩ where r = 8μ/(πR⁴) and\n"
+                "⟨Q²⟩ = mean(Q_t²) — see methods.md).  Threshold is\n"
+                "computed from the GRAPH-WIDE distribution of measured\n"
+                "values, so it's stable regardless of Tile filter.\n"
+                "Only affects measured-Q fields.  0 = no filtering.\n\n"
+                f"Network-wide Φ distribution ({_s['n']} edges):\n"
+                f"  min  : {_s['min']:.2e} W\n"
+                f"  10%  : {_s['p10']:.2e} W\n"
+                f"  median: {_s['p50']:.2e} W\n"
+                f"  90%  : {_s['p90']:.2e} W\n"
+                f"  max  : {_s['max']:.2e} W")
+        else:
+            tooltip = ("Hide bottom X % by dissipation Φ.\n"
+                       "(No edges have computed dissipation yet.)")
+        self._dissipation_filter_spin.setToolTip(tooltip)
+        self._dissipation_filter_spin.valueChanged.connect(
+            self._on_dissipation_pct_change)
+        diss_lay.addWidget(self._dissipation_filter_spin)
+        diss_lay.addStretch(1)
+        fld_lay.addWidget(diss_row)
 
         # Tile browser — load any tile's video by picking from a dropdown,
         # independent of edge selection.  Only shown if positions + video
@@ -1699,6 +1904,16 @@ class ReadOnlyMosaicViewer:
             self._tile_labels_chk.toggled.connect(
                 self._on_tile_labels_toggle)
             d_lay.addWidget(self._tile_labels_chk)
+        # Edge value labels (only render when Tile filter selects a
+        # single tile — at All-tiles scale the labels overlap badly).
+        self._edge_labels_chk = QCheckBox("Show edge value labels (single tile)")
+        self._edge_labels_chk.setToolTip(
+            "Show the current Property value at each edge's midpoint.\n"
+            "Only renders when Tile filter is set to a specific tile —\n"
+            "in All-tiles mode this would clutter the mosaic.\n"
+            "Labels update when you change Property / Harmonic / tile.")
+        self._edge_labels_chk.toggled.connect(self._on_edge_labels_toggle)
+        d_lay.addWidget(self._edge_labels_chk)
         layout.addWidget(d_group)
 
         layout.addStretch()
@@ -1854,14 +2069,48 @@ class ReadOnlyMosaicViewer:
             and self.current_source == 'measured'
             and self.current_quantity == 'Q'
         )
+        # Dissipation percentile filter — applies only to measured-Q.
+        ds_filter_active = (
+            float(self.dissipation_pct_filter) > 0.0
+            and self.current_source == 'measured'
+            and self.current_quantity == 'Q'
+        )
+        ds_threshold: Optional[float] = None
+        if ds_filter_active:
+            if self._cached_dissipation_threshold is None:
+                _ds_vals = [
+                    float(dd.get('_meas_dissipation'))
+                    for _, _, dd in self.G.edges(data=True)
+                    if dd.get('_meas_dissipation') is not None
+                        and np.isfinite(dd.get('_meas_dissipation'))
+                        and float(dd.get('_meas_dissipation')) > 0
+                ]
+                if _ds_vals:
+                    self._cached_dissipation_threshold = float(
+                        np.percentile(np.asarray(_ds_vals),
+                                       self.dissipation_pct_filter))
+                else:
+                    self._cached_dissipation_threshold = -np.inf
+            ds_threshold = self._cached_dissipation_threshold
+
         ts_threshold: Optional[float] = None
+        ts_source_key: str = 'Q_H1_snr_db'
         if ts_filter_active:
             if self._cached_total_snr_threshold is None:
+                # Prefer canonical Q_H1_snr_db (dB).  Fall back to legacy
+                # _h_total_snr (Var(fit)/Var(resid)) on older graphs.
                 all_tsnr = []
                 for _, _, dd in self.G.edges(data=True):
-                    v_ = dd.get('_h_total_snr')
+                    v_ = dd.get('Q_H1_snr_db')
                     if v_ is not None and np.isfinite(v_):
                         all_tsnr.append(float(v_))
+                if not all_tsnr:
+                    ts_source_key = '_h_total_snr'
+                    for _, _, dd in self.G.edges(data=True):
+                        v_ = dd.get('_h_total_snr')
+                        if v_ is not None and np.isfinite(v_):
+                            all_tsnr.append(float(v_))
+                self._snr_filter_source_key = ts_source_key
                 if all_tsnr:
                     self._cached_total_snr_threshold = float(
                         np.percentile(np.asarray(all_tsnr),
@@ -1869,6 +2118,8 @@ class ReadOnlyMosaicViewer:
                 else:
                     self._cached_total_snr_threshold = -np.inf
             ts_threshold = self._cached_total_snr_threshold
+            ts_source_key = getattr(self, '_snr_filter_source_key',
+                                     'Q_H1_snr_db')
         EDGE_WIDTH_MIN = 0.5
         EDGE_WIDTH_MAX = 22.0
         lines: List[np.ndarray] = []
@@ -1900,12 +2151,20 @@ class ReadOnlyMosaicViewer:
                 # filter is consistent across continuous + categorical
                 # views of measured-Q data.
                 if (ts_filter_active and ts_threshold is not None):
-                    edge_tsnr = d.get('_h_total_snr')
+                    edge_tsnr = d.get(ts_source_key)
                     gate_passes = (edge_tsnr is not None
                                     and np.isfinite(edge_tsnr)
                                     and float(edge_tsnr) >= ts_threshold)
                 else:
                     gate_passes = True
+                # Dissipation gate combines with SNR gate via AND.
+                if (gate_passes and ds_filter_active
+                        and ds_threshold is not None):
+                    edge_diss = d.get('_meas_dissipation')
+                    if (edge_diss is None
+                            or not np.isfinite(edge_diss)
+                            or float(edge_diss) < ds_threshold):
+                        gate_passes = False
                 if not gate_passes:
                     tiers.append(None)
                 elif self.current_property == 'harmonic_class':
@@ -1925,10 +2184,18 @@ class ReadOnlyMosaicViewer:
                 # the filter is stable across tile-filter changes.
                 if (ts_filter_active and val is not None
                         and ts_threshold is not None):
-                    edge_tsnr = d.get('_h_total_snr')
+                    edge_tsnr = d.get(ts_source_key)
                     if (edge_tsnr is None
                             or not np.isfinite(edge_tsnr)
                             or float(edge_tsnr) < ts_threshold):
+                        val = None
+                # Dissipation gate combines with SNR gate via AND.
+                if (ds_filter_active and val is not None
+                        and ds_threshold is not None):
+                    edge_diss = d.get('_meas_dissipation')
+                    if (edge_diss is None
+                            or not np.isfinite(edge_diss)
+                            or float(edge_diss) < ds_threshold):
                         val = None
                 vals.append(val if (val is not None
                                     and np.isfinite(val)) else None)
@@ -2019,6 +2286,8 @@ class ReadOnlyMosaicViewer:
         # state is in `_cbar_chk` + `_cbar_overlay`.)
         if getattr(self, '_cbar_chk', None) is not None:
             self._refresh_cbar()
+        # Edge value labels (no-op unless toggle on + single tile)
+        self._refresh_edge_labels()
 
     def _refresh_nodes(self):
         if self._nodes_layer is None:
@@ -2965,7 +3234,7 @@ class ReadOnlyMosaicViewer:
                 continue
             pts.append([H - y, x])
         if pts:
-            self._inference_carve_node_layer = self._add_points_compat(
+            self._inference_carve_node_layer = self.viewer.add_points(
                 np.asarray(pts), size=18,
                 face_color='#ff6600',  # orange
                 border_color='white',
@@ -3595,6 +3864,12 @@ class ReadOnlyMosaicViewer:
                 # read the sign directly.
                 d['_sim_tmp_pressure_mean'] = p_dc
                 d['_sim_tmp_pressure_amp'] = amp_p
+                # H2 midpoint pressure amplitude (Pa) — analogous to
+                # pressure_amp but at the second harmonic.  NaN if the
+                # solver didn't compute H2.
+                amp_p_h2 = (float(abs(p_mid[2]))
+                             if len(p_mid) > 2 else float('nan'))
+                d['_sim_tmp_pressure_amp_H2'] = amp_p_h2
                 # Pressure drop across the edge: |P_u_DC − P_v_DC| (Pa).
                 # Magnitude so the colormap reads unambiguously; sign
                 # would depend on edge orientation (undirected graph).
@@ -3671,6 +3946,16 @@ class ReadOnlyMosaicViewer:
         self.total_snr_pct_filter = float(val)
         # Force re-derivation of the cached threshold next refresh.
         self._cached_total_snr_threshold = None
+        self._refresh_edges()
+        self._refresh_nodes()
+        self._refresh_cbar()
+
+    def _on_dissipation_pct_change(self, val: float):
+        """Update the network-wide dissipation percentile filter.
+        Threshold is re-derived from `_meas_dissipation` (W) values
+        across the whole graph — stable regardless of Tile filter."""
+        self.dissipation_pct_filter = float(val)
+        self._cached_dissipation_threshold = None
         self._refresh_edges()
         self._refresh_nodes()
         self._refresh_cbar()
@@ -3855,7 +4140,7 @@ class ReadOnlyMosaicViewer:
             c_mid = c0 + 0.5 * TILE_RAW_WIDTH * t['scale_x']
             pts.append([r_mid, c_mid])
             labels.append(str(tid))
-        self._tile_labels_layer = self._add_points_compat(
+        self._tile_labels_layer = self.viewer.add_points(
             np.array(pts), size=0, name='Tile numbers',
             text={'string': labels, 'size': 14,
                    'color': 'yellow', 'anchor': 'center'},
@@ -5864,6 +6149,79 @@ class ReadOnlyMosaicViewer:
         self.show_tile_labels = bool(checked)
         self._refresh_tile_labels()
 
+    def _on_edge_labels_toggle(self, checked: bool):
+        self.show_edge_labels = bool(checked)
+        self._refresh_edge_labels()
+
+    def _refresh_edge_labels(self):
+        """Render the current Property value as text at each edge's
+        midpoint.  Only active when self.show_edge_labels is True AND
+        Tile filter is set to a specific tile — in All-tiles mode the
+        labels clutter the mosaic.
+        """
+        # Always start by removing any existing label layer; we then
+        # decide whether to add a fresh one based on current state.
+        if self._edge_labels_layer is not None:
+            try:
+                self.viewer.layers.remove(self._edge_labels_layer)
+            except (KeyError, ValueError):
+                pass
+            self._edge_labels_layer = None
+        if not self.show_edge_labels:
+            return
+        if self.current_tile_filter is None:
+            return
+        tile_id = int(self.current_tile_filter)
+        prop = self.current_property
+        # Format helpers for the most common property types
+        def _fmt(val: float) -> str:
+            if prop == 'phase':
+                return f"{np.degrees(val):+.0f}°"
+            if prop in ('snr', 'snr_ac', 'snr_total'):
+                return f"{val:+.1f} dB"
+            if prop == 'PI':
+                return f"{val:.2f}"
+            if prop == 'frequency':
+                return f"{val:.2f} Hz"
+            if prop == 'dissipation':
+                return f"{val:.1e} W"
+            if prop in ('radius', 'length'):
+                return f"{val:.0f}"
+            # default: 3-sig-fig
+            return f"{val:.3g}"
+        points = []
+        texts = []
+        H_mosaic = self.mosaic_height
+        for u, v in self.edge_list:
+            d = self.G.edges[u, v]
+            # Only edges with a measurement on the active tile.
+            if not any(m.get('tile_id') == tile_id
+                       for m in (d.get('measurements_piv') or [])):
+                continue
+            val = self._resolve_field_value(u, v)
+            if val is None or not np.isfinite(val):
+                continue
+            x1, y1 = self.G.nodes[u]['x'], self.G.nodes[u]['y']
+            x2, y2 = self.G.nodes[v]['x'], self.G.nodes[v]['y']
+            xm = 0.5 * (float(x1) + float(x2))
+            ym = 0.5 * (float(y1) + float(y2))
+            points.append([H_mosaic - ym, xm])
+            texts.append(_fmt(float(val)))
+        if not points:
+            return
+        try:
+            self._edge_labels_layer = self.viewer.add_points(
+                np.asarray(points, dtype=float),
+                size=0,
+                text={'string': texts, 'size': 8, 'color': 'white',
+                       'anchor': 'center'},
+                name='Edge labels',
+                face_color='transparent',
+                border_color='transparent',
+            )
+        except Exception as e:
+            print(f"  Could not add edge-label layer: {e}")
+
     def _load_video_for_selected(self):
         tid = getattr(self, '_selected_tile_id', None)
         if tid is None:
@@ -5893,8 +6251,62 @@ class ReadOnlyMosaicViewer:
         # populated by the first `_refresh_edges()` above, so do it here
         # rather than at the end of `_setup_panel`.
         self._refresh_cbar()
+        if self.rotate_cw or self.rotate_ccw:
+            self._apply_view_rotation(ccw=self.rotate_ccw)
         import napari
         napari.run()
+
+    def _apply_view_rotation(self, ccw: bool = False):
+        """Rotate every layer by 90° on top of its base affine.
+
+        CW   (default):  (row, col) → (col,         H − row)
+        CCW (ccw=True):  (row, col) → (W − col,     row     )
+
+        Useful for datasets stored on their sides (e.g. 15-somite,
+        which needs CCW rotation to put the embryo body axis vertical
+        in the same orientation as the 21- and 27-somite mosaics).
+
+        Caches the rotation affine and subscribes to the layers'
+        `events.inserted` signal so that layers added LATER (tile
+        numbers, video overlay, click markers, …) also get rotated.
+        """
+        H = self.mosaic.shape[0] if self.mosaic is not None else int(
+            self.G.graph.get('mosaic_height', 0))
+        W = self.mosaic.shape[1] if self.mosaic is not None else int(
+            self.G.graph.get('mosaic_width', 0))
+        if H <= 0 or W <= 0:
+            return
+        if ccw:
+            rot_affine = np.array([[0, -1, W],
+                                     [1,  0, 0],
+                                     [0,  0, 1]], dtype=float)
+        else:
+            rot_affine = np.array([[0,  1, 0],
+                                     [-1, 0, H],
+                                     [0,  0, 1]], dtype=float)
+        self._rotation_affine = rot_affine
+
+        def _rotate_layer(layer):
+            base = np.array(layer.affine.affine_matrix)
+            if base.shape[0] == 3:
+                layer.affine = rot_affine @ base
+            elif base.shape[0] == 4:
+                rot4 = np.eye(4)
+                rot4[1:3, 1:3] = rot_affine[:2, :2]
+                rot4[1:3, 3] = rot_affine[:2, 2]
+                layer.affine = rot4 @ base
+
+        for layer in self.viewer.layers:
+            _rotate_layer(layer)
+
+        # Catch layers added later (tile-number overlay, video, markers).
+        def _on_layer_inserted(event):
+            try:
+                _rotate_layer(event.value)
+            except Exception as exc:
+                print(f"  WARN: failed to rotate new layer "
+                      f"{getattr(event.value, 'name', '?')!r}: {exc}")
+        self.viewer.layers.events.inserted.connect(_on_layer_inserted)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -5938,6 +6350,14 @@ def main():
                         help="Wipe any existing harmonic_class values and "
                              "recompute from scratch.  Useful if PIV was "
                              "re-run and the cached values are stale.")
+    parser.add_argument('--rotate-cw', action='store_true',
+                        help="Rotate the mosaic 90° clockwise on startup.")
+    parser.add_argument('--rotate-ccw', action='store_true',
+                        help="Rotate the mosaic 90° counter-clockwise on "
+                             "startup.  Use for 15-somite (stored on its "
+                             "side, body axis horizontal) to put the embryo "
+                             "vertical in the same orientation as the 21- "
+                             "and 27-somite mosaics.")
     args = parser.parse_args()
 
     # Resolve paths via config if provided; individual args win.
@@ -5980,6 +6400,8 @@ def main():
         initial_field=args.initial_field,
         cache_harmonic_class=not args.no_cache_harmonic_class,
         force_recompute_harmonic_class=args.force_recompute_harmonic_class,
+        rotate_cw=args.rotate_cw,
+        rotate_ccw=args.rotate_ccw,
     )
     viewer.run()
 

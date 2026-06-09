@@ -161,6 +161,49 @@ def periodogram_snr_at_f0(freqs: np.ndarray, power: np.ndarray,
     return float(np.mean(power[mask]) / median_power)
 
 
+def snr_harmonic_band(freqs: np.ndarray, power: np.ndarray, f0: float,
+                       n_harm: int = 3, half_width: float = 0.15,
+                       cutoff_factor: float = 3.5) -> float:
+    """Band-limited Wikipedia-style SNR: signal = power at harmonic bands
+    (DC + n_harm·f₀), noise = power elsewhere within f ≤ cutoff_factor·f₀.
+
+    Treats DC and each harmonic equally as "signal" so a high-DC,
+    low-pulsatility vessel gets fair credit (unlike ``snr_pulse`` which
+    drops the mean from both numerator and denominator).  Restricting the
+    noise integration to the analysis bandwidth (default just under the
+    4th harmonic) keeps sensor / shake noise above the model's reach
+    out of the denominator.
+
+    Returns the linear power ratio (≥ 1 ⇒ signal energy ≥ noise energy
+    within the band).  Caller can take ``10 * log10`` for dB.
+    """
+    if not np.isfinite(f0) or f0 <= 0:
+        return float("nan")
+    f_cutoff = float(cutoff_factor) * float(f0)
+    in_band = freqs <= f_cutoff
+    if not np.any(in_band):
+        return float("nan")
+
+    signal_mask = np.zeros_like(freqs, dtype=bool)
+    for k in range(int(n_harm) + 1):
+        if k == 0:
+            # DC band: [0, half_width] (no negative freqs to mirror).
+            signal_mask |= (freqs >= 0) & (freqs <= half_width)
+        else:
+            signal_mask |= np.abs(freqs - k * f0) <= half_width
+
+    signal_bins = signal_mask & in_band
+    noise_bins  = in_band & ~signal_mask
+    if not np.any(noise_bins) or not np.any(signal_bins):
+        return float("nan")
+
+    p_signal = float(np.sum(power[signal_bins]))
+    p_noise  = float(np.sum(power[noise_bins]))
+    if p_noise <= 0:
+        return float("inf") if p_signal > 0 else float("nan")
+    return p_signal / p_noise
+
+
 def consensus_f0_stacked(
     periodograms: list,
     fmin_hz: float = 1.0,
@@ -269,6 +312,7 @@ def fit_harmonics(
     loss: Literal["huber", "tukey", "none"] = "huber",
     loss_params: Optional[Dict[str, float]] = None,
     include_dc: bool = True,
+    snr_harm_cutoff_factor: float = 3.5,
 ) -> Dict[str, Any]:
     """
     Fit harmonic model to velocity time series using robust IRLS.
@@ -313,9 +357,13 @@ def fit_harmonics(
             resid=np.full(T, np.nan, float),
             r2=np.nan,
             hr_snr_db=np.nan,
+            snr_harm_fit_db=np.nan,
+            snr_ac_fit_db=np.nan,
+            snr_dc_fit_db=np.nan,
             f0=float(f0),
             amp_rms_ac=np.nan,
             amp1=np.nan,
+            **{f'snr_h{k}_db': np.nan for k in range(1, int(K) + 1)},
         )
 
     y = y0[m_valid]
@@ -420,16 +468,79 @@ def fit_harmonics(
             sigma_amp = np.nan
             sigma_phi = np.nan
 
+        # Per-harmonic power: ½(A² + B²) by Parseval.  Used both in the
+        # AC accumulator and for per-harmonic SNR below.
+        P_sig_k = 0.5 * (A * A + B * B)
         harmonics.append(dict(k=k, A=A, B=B, amp=amp, phi=phi,
                               sigma_A=sigma_A, sigma_B=sigma_B,
-                              sigma_amp=sigma_amp, sigma_phi=sigma_phi))
-        P_sig += 0.5 * (A * A + B * B)
+                              sigma_amp=sigma_amp, sigma_phi=sigma_phi,
+                              P_sig=P_sig_k))
+        P_sig += P_sig_k
         if k == 1:
             amp1 = amp
             sigma_amp1 = sigma_amp
             sigma_phase1 = sigma_phi
 
     amp_rms_ac = float(np.sqrt(max(P_sig, 0.0)))
+
+    # ── Fit-based SNR_harm ────────────────────────────────────────────────
+    # Theoretically cleaner than the bin-based periodogram form: signal
+    # power comes directly from the fit coefficients (a0² + ½·Σ(A²+B²))
+    # so it doesn't depend on the bin-width or integration-band choice
+    # of a spectral readout.  Noise = mean-squared residual band-limited
+    # to f ≤ cutoff_factor · f0, so the metric isn't penalised by
+    # out-of-model high-frequency noise.  Returned in dB.
+    #
+    # Two variants:
+    #   snr_harm_fit_db  — full Wikipedia SNR with DC counted as signal
+    #                      (use when downstream cares about *any* reliable
+    #                      flow information — e.g. mean Q for inference)
+    #   snr_ac_fit_db    — AC-only SNR (drop a0² from numerator) — use
+    #                      when downstream specifically needs cardiac
+    #                      waveform fidelity (AV-fingerprint phase,
+    #                      harmonic-shape comparison).
+    signal_power_fit = float(a0 * a0 + P_sig)   # DC + AC (Wiki-style)
+    signal_power_ac  = float(P_sig)             # AC only (½·Σ(A²+B²))
+    signal_power_dc  = float(a0 * a0)           # DC only (a₀²)
+    fs_fit = 1.0 / float(frame_dt) if frame_dt > 0 else np.nan
+    cutoff_hz = float(snr_harm_cutoff_factor) * float(f0)
+    if (np.isfinite(fs_fit) and np.isfinite(cutoff_hz)
+            and cutoff_hz > 0 and len(resid) >= 8):
+        N_res = len(resid)
+        spec_res = np.fft.rfft(resid)
+        freqs_res = np.fft.rfftfreq(N_res, d=float(frame_dt))
+        spec_bl = spec_res.copy()
+        spec_bl[freqs_res > cutoff_hz] = 0.0
+        resid_bl = np.fft.irfft(spec_bl, n=N_res)
+        ms_bl = float(np.mean(resid_bl ** 2))
+        if ms_bl > 0 and signal_power_fit > 0:
+            snr_harm_fit_db = 10.0 * np.log10(signal_power_fit / ms_bl)
+        else:
+            snr_harm_fit_db = float("nan")
+        if ms_bl > 0 and signal_power_ac > 0:
+            snr_ac_fit_db = 10.0 * np.log10(signal_power_ac / ms_bl)
+        else:
+            snr_ac_fit_db = float("nan")
+        # ── DC-only SNR (a₀² / MS_BL) ─────────────────────────────────
+        if ms_bl > 0 and signal_power_dc > 0:
+            snr_dc_fit_db = 10.0 * np.log10(signal_power_dc / ms_bl)
+        else:
+            snr_dc_fit_db = float("nan")
+        # ── Per-harmonic SNRs (10·log10(P_sig_k / MS_BL) for each k) ─────
+        # Useful when downstream code (e.g. D₀ inference noise weighting)
+        # wants to gate each harmonic channel independently.  Stored both
+        # on each `harmonics[k]` dict and as flat snr_hk_db keys.
+        for hd in harmonics:
+            if ms_bl > 0 and hd['P_sig'] > 0:
+                hd['snr_db'] = 10.0 * np.log10(hd['P_sig'] / ms_bl)
+            else:
+                hd['snr_db'] = float('nan')
+    else:
+        snr_harm_fit_db = float("nan")
+        snr_ac_fit_db   = float("nan")
+        snr_dc_fit_db   = float("nan")
+        for hd in harmonics:
+            hd['snr_db'] = float('nan')
 
     # Expand to full length
     signal_full = np.full(T, np.nan, float)
@@ -445,6 +556,12 @@ def fit_harmonics(
         resid=resid_full,
         r2=r2,
         hr_snr_db=hr_snr_db,
+        snr_harm_fit_db=snr_harm_fit_db,
+        snr_ac_fit_db=snr_ac_fit_db,
+        snr_dc_fit_db=snr_dc_fit_db,
+        # Flat per-harmonic SNRs for k=1..K (NaN if k out of range)
+        **{f'snr_h{hd["k"]}_db': hd.get('snr_db', float('nan'))
+           for hd in harmonics},
         f0=float(f0),
         amp_rms_ac=amp_rms_ac,
         amp1=amp1,

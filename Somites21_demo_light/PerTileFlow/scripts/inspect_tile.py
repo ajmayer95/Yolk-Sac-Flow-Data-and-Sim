@@ -45,9 +45,7 @@ from synthetic_validation_neumann_bc import (
     joint_lm, MU, F0_HZ, PX_SIZE_M, HARMONICS, nL_per_m3,
 )
 
-GRAPH_PATH = ("~/Library/CloudStorage/"
-              "<your-drive>/My Drive/"
-              "Somites21/Mosaic/Graphs/mosaic_graph_analyzed.gpickle")
+GRAPH_PATH = "mosaic_graph_canonical.gpickle"
 OUT_DIR = PROJECT_ROOT / "renders" / "meeting" / "tile_inspector"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -91,7 +89,9 @@ def build_tile_problem(graph, tile_id, drop_dangling=True):
     valid_h1 = np.zeros(n_edges, dtype=bool)
     for i, (u, v) in enumerate(edges_in):
         ed = graph.edges[u, v]
-        mq = ed.get("mean_Q") or ed.get("mean_Q_nL_s")
+        # DC mean flow: canonical Q_DC → legacy mean_Q_piv → kymo mean_Q.
+        mq = (ed.get("Q_DC") or ed.get("mean_Q_piv")
+              or ed.get("mean_Q") or ed.get("mean_Q_nL_s"))
         ff = ed.get("flow_from"); ft = ed.get("flow_to")
         if mq is None or not np.isfinite(mq) or ff is None or ft is None:
             continue
@@ -99,7 +99,15 @@ def build_tile_problem(graph, tile_id, drop_dangling=True):
         sign = 1.0 if (ff == u and ft == v) else -1.0
         Q_DC_obs[i] = float(mq) * sign / nL_per_m3      # → SI m³/s
         valid_dc[i] = True
-        amp = ed.get("amp_Q"); phase = ed.get("phase")
+        # H1 phasor: canonical Q_H1_{amp,phi} → legacy amp_Q_h1_piv → kymo amp_Q.
+        # See SCHEMA.md (v0.3.0) for the canonical field definition.
+        amp = ed.get("Q_H1_amp")
+        phase = ed.get("Q_H1_phi")
+        if amp is None or phase is None:
+            amp = ed.get("amp_Q_h1_piv")
+            phase = ed.get("phase_h1_piv")
+        if amp is None or phase is None:
+            amp = ed.get("amp_Q"); phase = ed.get("phase")
         if amp is not None and phase is not None and np.isfinite(amp) and np.isfinite(phase):
             Q_H1_obs[i] = (float(amp) * np.exp(1j * float(phase))
                             * sign / nL_per_m3)

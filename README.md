@@ -9,12 +9,19 @@ This repo holds the lightweight documentation only (<100 KB).  The
 actual bundles ship as **release assets** on the
 [Releases page](../../releases) — pick the stage you want.
 
+**Latest: v0.3.0** introduces a canonical graph schema with
+unambiguous, refit-verified flow fields.  See [`CHANGELOG.md`](CHANGELOG.md)
+and [`SCHEMA.md`](SCHEMA.md) for the migration details.  Existing v0.2.0
+bundles remain compatible — drop in the new canonical graph from the
+v0.3.0 release at `emb1/analyzed/`.
+
 ## Bundles
 
-| Stage | Folder | Bundle zip on Releases | Total size |
-| :---: | :--- | :--- | ---: |
-| HH-21 | [`Somites21_demo/`](Somites21_demo/) | `Somites21_demo.zip` | ~1.4 GB |
-| HH-27 | [`Somites27_demo/`](Somites27_demo/) | `Somites27_demo.zip` | ~1.7 GB |
+| Stage | Folder | v0.2.0 full bundle | v0.3.0 canonical-graph drop-in |
+| :---: | :--- | :--- | :--- |
+| HH-15 | [`Somites15_demo/`](Somites15_demo/) | `Somites15_demo.zip` (~870 MB) | `Somites15_canonical_graph_v0.3.0.zip` (~48 MB) |
+| HH-21 | [`Somites21_demo/`](Somites21_demo/) | `Somites21_demo.zip` (~1.4 GB) | `Somites21_canonical_graph_v0.3.0.zip` (~88 MB) |
+| HH-27 | [`Somites27_demo/`](Somites27_demo/) | `Somites27_demo.zip` (~1.7 GB) | `Somites27_canonical_graph_v0.3.0.zip` (~94 MB) |
 
 Each subfolder in this repo contains the bundle's `README.md`,
 `LAUNCH.txt`, `CODE_CONTEXT.md`, and `emb1/config.json` — the

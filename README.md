@@ -15,6 +15,11 @@ and [`SCHEMA.md`](SCHEMA.md) for the migration details.  Existing v0.2.0
 bundles remain compatible — drop in the new canonical graph from the
 v0.3.0 release at `emb1/analyzed/`.
 
+If you also want the new viewer features (per-harmonic SNR Properties,
+dissipation filter, edge value labels), download `pertile_code_v0.3.0.zip`
+from the release and unzip it over your existing `PerTileFlow/`
+folder — 94 KB drop-in, no re-download of the full bundle needed.
+
 ## Bundles
 
 | Stage | Folder | v0.2.0 full bundle | v0.3.0 canonical-graph drop-in |

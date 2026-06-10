@@ -40,7 +40,7 @@ from pertile.analysis.local_pressure_inference import (
 
 GRAPH_PATH = ("~/Library/CloudStorage/"
               "<your-drive>/My Drive/"
-              "Somites21/Mosaic/Graphs/mosaic_graph_analyzed.gpickle")
+              "Somites21/Mosaic/Graphs/mosaic_graph_canonical.gpickle")
 
 OUT_DIR = PROJECT_ROOT / "renders" / "paper_figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,9 +82,16 @@ def read_boundary_vessel_flows(graph):
             continue
         nb = nbrs[0]
         ed = graph.edges[n, nb]
-        mean_Q = ed.get("mean_Q") or ed.get("mean_Q_nL_s")
-        amp_Q = ed.get("amp_Q")
-        phase = ed.get("phase")
+        mean_Q = (ed.get("Q_DC") or ed.get("mean_Q_piv")
+                  or ed.get("mean_Q") or ed.get("mean_Q_nL_s"))
+        amp_Q = ed.get("Q_H1_amp")
+        phase = ed.get("Q_H1_phi")
+        if amp_Q is None or phase is None:
+            amp_Q = ed.get("amp_Q_h1_piv")
+            phase = ed.get("phase_h1_piv")
+        if amp_Q is None or phase is None:
+            amp_Q = ed.get("amp_Q")
+            phase = ed.get("phase")
         if mean_Q is None or amp_Q is None or phase is None:
             print(f"  WARNING: edge {n}↔{nb} missing Q metadata; skipping")
             continue

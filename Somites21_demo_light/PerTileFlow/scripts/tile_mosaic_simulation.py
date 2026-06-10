@@ -145,10 +145,19 @@ def write_edge_flow_csv(path: Path, graph, result, n_harmonics: int) -> None:
                 row[f"amp_h{h}_nL_s"] = float(abs(qh))
                 row[f"phase_h{h}_rad"] = float(np.angle(qh))
             ed = graph.edges[u, v]
-            row["measured_mean_Q_nL_s"] = ed.get("mean_Q",
-                                                  ed.get("mean_Q_nL_s"))
-            row["measured_amp_h1_nL_s"] = ed.get("amp_Q")
-            row["measured_phase_h1_rad"] = ed.get("phase")
+            row["measured_mean_Q_nL_s"] = (
+                ed.get("Q_DC") or ed.get("mean_Q_piv")
+                or ed.get("mean_Q") or ed.get("mean_Q_nL_s"))
+            amp = ed.get("Q_H1_amp")
+            phase = ed.get("Q_H1_phi")
+            if amp is None or phase is None:
+                amp = ed.get("amp_Q_h1_piv")
+                phase = ed.get("phase_h1_piv")
+            if amp is None or phase is None:
+                amp = ed.get("amp_Q")
+                phase = ed.get("phase")
+            row["measured_amp_h1_nL_s"] = amp
+            row["measured_phase_h1_rad"] = phase
             writer.writerow(row)
 
 

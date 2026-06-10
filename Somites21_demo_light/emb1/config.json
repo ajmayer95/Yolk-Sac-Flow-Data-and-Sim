@@ -1,5 +1,5 @@
 {
-    "mosaic_graph": "analyzed/mosaic_graph_analyzed.gpickle",
+    "mosaic_graph": "analyzed/mosaic_graph_canonical.gpickle",
     "mosaic_tiff": "analyzed/stitched_linear.tif",
     "tile_positions": "analyzed/tile_positions_manual.json",
     "video_dir": "videos",

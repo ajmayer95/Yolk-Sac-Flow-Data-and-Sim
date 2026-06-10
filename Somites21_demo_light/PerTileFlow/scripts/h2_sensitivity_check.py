@@ -48,15 +48,15 @@ B_KCL = 0.29
 
 def fetch_h2_phasor(graph, edges_in, valid_h1, Q_DC_obs):
     """Build Q_H2_obs (SI m³/s, complex) per edge.  Uses
-    amp_Q_h2_piv and phase_h2_piv on each edge; signs flip to match
+    Q_H2_amp/Q_H2_phi with legacy fallback on each edge; signs flip to match
     flow_from→flow_to direction (same convention as DC and H1)."""
     n = len(edges_in)
     Q_H2 = np.zeros(n, dtype=complex)
     valid_h2 = np.zeros(n, dtype=bool)
     for i, (u, v) in enumerate(edges_in):
         ed = graph.edges[u, v]
-        amp = ed.get("amp_Q_h2_piv")
-        phase = ed.get("phase_h2_piv")
+        amp = ed.get("Q_H2_amp") or ed.get("amp_Q_h2_piv")
+        phase = ed.get("Q_H2_phi") or ed.get("phase_h2_piv")
         ff = ed.get("flow_from"); ft = ed.get("flow_to")
         if (amp is None or phase is None or not np.isfinite(amp)
                 or not np.isfinite(phase)):

@@ -277,8 +277,8 @@ def _bayes_observations(graph, prob: dict, harmonics: Sequence[int]) -> dict:
     valid = np.zeros(len(prob["edges_in"]), dtype=bool)
     for i, (u, v) in enumerate(prob["edges_in"]):
         ed = graph.edges[u, v]
-        amp = ed.get("amp_Q_h2_piv")
-        phase = ed.get("phase_h2_piv")
+        amp = ed.get("Q_H2_amp") or ed.get("amp_Q_h2_piv")
+        phase = ed.get("Q_H2_phi") or ed.get("phase_h2_piv")
         if amp is None or phase is None:
             amp = ed.get("_h_amp_H2")
             phase = ed.get("_h_phase_H2")

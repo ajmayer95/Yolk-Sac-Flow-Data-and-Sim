@@ -1,6 +1,6 @@
 # Distensibility Analysis Methods and Current Results
 
-Date: 2026-06-09
+Date: 2026-06-10
 
 This note summarizes the methods attempted so far for the Somites21 and Somites27 yolk-sac mosaic datasets, with comments on what the current results suggest about distensibility. The emphasis is on tile-by-tile recovery/inference, profile likelihood/posterior shape, and phase-based diagnostics.
 
@@ -11,6 +11,8 @@ Somites21:
 - `Somites21_demo/PerTileFlow/scripts/default_mosaic_tile_profiles.py`
 - `Somites21_demo/PerTileFlow/scripts/infer_default_mosaic_tile_profiles.py`
 - `Somites21_demo/PerTileFlow/scripts/infer_bayes_default_mosaic_tile_profiles.py`
+- `Somites21_demo/PerTileFlow/scripts/self_consistency.py`
+- `Somites21_demo/PerTileFlow/scripts/global_inverse_shared_D.py`
 - `Somites21_demo_light/PerTileFlow/scripts/infer_bayes_default_mosaic_tile_profiles.py`
 
 Somites27:
@@ -20,6 +22,18 @@ Somites27:
 - `Somites27_demo/PerTileFlow/scripts/infer_bayes_default_mosaic_tile_profiles.py`
 
 The newest phase-correlation dashboard features are currently in the Somites21 Bayesian script and the Somites21 light copy. They have not yet been ported into the Somites27 Bayesian script.
+
+New Somites21 outputs generated on 2026-06-10:
+
+- `Somites21_demo/PerTileFlow/renders/meeting/self_consistency/self_consistency_summary.json`
+- `Somites21_demo/PerTileFlow/renders/meeting/self_consistency/self_consistency_METHOD.md`
+- `Somites21_demo/PerTileFlow/renders/meeting/self_consistency/self_consistency_shared_D_profile.csv`
+- `Somites21_demo/PerTileFlow/renders/meeting/self_consistency/self_consistency_overlap_pairs.csv`
+- `Somites21_demo/PerTileFlow/renders/meeting/self_consistency/self_consistency_report.html`
+- `Somites21_demo/PerTileFlow/renders/meeting/global_inverse_shared_D/global_inverse_summary.json`
+- `Somites21_demo/PerTileFlow/renders/meeting/global_inverse_shared_D/global_inverse_profile.csv`
+- `Somites21_demo/PerTileFlow/renders/meeting/global_inverse_shared_D/global_inverse_residuals_at_best.csv`
+- `Somites21_demo/PerTileFlow/renders/meeting/global_inverse_shared_D/global_inverse_shared_D.html`
 
 ## Methods Attempted
 
@@ -322,6 +336,125 @@ Somites27 status:
 - The same phase-correlation panel has not yet been ported into the Somites27 Bayesian script.
 - Somites27 has Bayesian H1 and H1+H2 posterior outputs, but not the latest tile phase-identifiability metrics in the main output folder.
 
+### 11. Shared-D Self-Consistency and Tile-Order Phase Correction
+
+Script:
+
+```bash
+python scripts/self_consistency.py \
+  --config ../emb1/config.json \
+  --use-second-harmonic
+```
+
+Recommended no-correction baseline:
+
+```bash
+python scripts/self_consistency.py \
+  --config ../emb1/config.json \
+  --use-second-harmonic \
+  --timing-mode none
+```
+
+Purpose:
+
+- Combine the existing tile-level Bayesian marginal likelihoods into one shared-D profile.
+- Plot the shared-D profile likelihood, prior, and posterior.
+- Test whether a simple tile-order phase correction improves consistency between overlapping measurements of the same graph edge.
+- Use tile acquisition order as prior information: lower tile numbers were measured earlier, and all Somites21 tiles were acquired over roughly five minutes.
+
+Phase-correction modes:
+
+- `--timing-mode none`: no phase correction; this is the cleanest baseline.
+- `--timing-mode fit_beta`: fit a signed global linear phase drift across tile order using overlap phase mismatch.
+- `--timing-mode fixed_acquisition_time`: impose a phase drift from the nominal acquisition duration and median frequency.
+
+How the phase correction works:
+
+```text
+theta_t = beta * timing_coordinate_t
+phi_corrected = phi_measured - h * theta_t
+```
+
+where `h` is the harmonic number. H2 receives twice the phase correction of H1.
+
+Current Somites21 findings:
+
+- The 2026-06-10 saved baseline used all 53 Somites21 tiles, H1+H2, tile-order timing, and `--timing-mode none`.
+- It included 23,594 harmonic measurements and 19,838 overlapping tile-pair phase comparisons.
+- With `--timing-mode none`, the shared-D profile likelihood is already narrow and the posterior is sharply peaked.
+- The saved baseline has shared-D likelihood mode `3.16e-4`, posterior mode `3.16e-4`, posterior median `2.78e-4`, and approximate 95% posterior interval `2.09e-4` to `3.14e-4`.
+- The raw overlap absolute phase mismatch in this no-correction run had mean `1.57` rad, median `1.56` rad, and p90 `2.83` rad.
+- The prior is comparatively broad/flat over the plotted D range, so the sharp posterior is not simply prior-driven.
+- Earlier/alternate phase-correction runs indicated that introducing tile-order phase corrections does not materially change the shared-D likelihood/posterior profiles.
+- The fitted tile-order correction is not uniformly helpful for overlap phases. It can give a modest average improvement but helps some overlap pairs while worsening others.
+- The raw-versus-corrected mismatch scatter can look nearly symmetric, and largest improvements/worsenings can approach `pi` because phase differences are wrapped.
+- The fitted `beta` is multi-modal and search-range-dependent because the objective uses wrapped phases. Therefore, fitted beta should be treated as a diagnostic correction, not as a literal acquisition-time estimate.
+
+Interpretation:
+
+- These results are evidence that the current shared-D inference is not strongly dependent on the simple phase-adjustment model.
+- A global linear tile-order phase correction is probably too crude to explain stitched phase mismatch.
+- The phase-correction experiment is still useful as a stress test for acquisition-order artifacts, but it should not be part of the main distensibility result unless a clearer, physically interpretable correction model is developed.
+- For current reporting, `--timing-mode none` is the preferred baseline, while `fit_beta` and `fixed_acquisition_time` are sensitivity analyses.
+
+Important limitation:
+
+- The self-consistency script still does not solve the full global pressure inverse problem. It multiplies tile-level marginal likelihoods and separately analyzes overlap phase consistency. It does not yet fit one global pressure/flow field to all measured tile observations simultaneously.
+
+### 12. First-Pass Full-Mosaic Shared-D Inverse
+
+Script:
+
+```bash
+python scripts/global_inverse_shared_D.py \
+  --config ../emb1/config.json
+```
+
+H1 + H2 variant:
+
+```bash
+python scripts/global_inverse_shared_D.py \
+  --config ../emb1/config.json \
+  --use-second-harmonic
+```
+
+Purpose:
+
+- Solve the whole mosaic once per D value.
+- Enforce one mosaic-wide pressure/flow field for all graph edges.
+- Score measured edge flows against the global predicted edge flows.
+- Produce a global shared-D profile likelihood, prior, and posterior.
+
+This differs from the tile inference scripts in an important way:
+
+- Tile inference fits or marginalizes tile-local boundary conditions.
+- `self_consistency.py` multiplies tile-level likelihoods.
+- `global_inverse_shared_D.py` scores all measured observations against one whole-mosaic solve, so tile boundaries are no longer independently free.
+
+Current first-pass assumptions:
+
+- A/V boundary flow waveforms are fixed from the same viewer-default boundary setup used in the simulation scripts.
+- D is the only fitted physical parameter.
+- Per-tile measurements can be scored directly with `--observation-source per-tile`.
+- Top-level graph edge measurements can be scored with `--observation-source top-level`.
+- H1-only or H1+H2 can be used.
+
+Current saved Somites21 run:
+
+- The 2026-06-10 saved run used top-level observations, H1 only, oriented observations, a 41-point D grid from `1e-5` to `1e-1`, viewer-default fixed A/V flow boundary conditions, target flux `1.0` nL/s, and `f0 = 2.773` Hz.
+- The likelihood and posterior modes were both `2.51e-3`.
+- The posterior median was `2.51e-3`, with approximate 95% posterior interval `2.25e-3` to `2.80e-3`.
+- The best-fit residual was still high: `chi2_min = 1.82e5`, `chi2_red_min = 11.8`, with 15,430 scalar observations represented by 10,287 scored rows.
+- The previous very coarse smoke test landed at the high end of its tested range (`D=0.1`), but the current 41-point saved top-level H1 run has an interior optimum near `2.5e-3`.
+
+Interpretation:
+
+- This is the first actual global inverse scaffold: one D, one mosaic solve, one global residual.
+- The interior optimum is encouraging as a numerical profile, but the large reduced chi-square means this should not yet be treated as a final biological estimate.
+- The high residuals likely reflect the restrictive fixed viewer-default A/V boundary forcing, remaining observation/orientation/noise mismatch, or missing physics/heterogeneity.
+- The next methodological step is to relax or infer global boundary forcing rather than keeping the viewer-default A/V flow waveforms fixed.
+- A useful intermediate model would keep a single shared D but fit low-dimensional source/sink boundary amplitudes or complex harmonic scale factors jointly with D.
+
 ## Distensibility Comments
 
 ### Identifiability
@@ -362,16 +495,34 @@ Interior/periphery differences are present but not decisive. Periphery tiles cur
 
 Phase heterogeneity may be one of the most useful qualitative diagnostics. Smooth phase variation would be more consistent with simple propagation through a locally coherent compliant network. Sharp edge-to-edge jumps suggest local transitions, attenuation, topology changes, or model mismatch. These jumps are now measurable and can be compared directly against posterior curvature, credible interval width, and `log10(D_hat)`.
 
+### Phase Correction and D Identifiability
+
+The current self-consistency results suggest that simple tile-order phase correction is not a major driver of the shared-D estimate. The 2026-06-10 no-correction H1+H2 run is already narrow and sharply peaked, with shared-D posterior mode `3.16e-4`. Earlier phase-correction comparisons did not meaningfully alter the D profile. This supports the interpretation that, under the current model, D identifiability is coming mostly from the harmonic flow/pressure response encoded in the tile likelihoods rather than from the tile-order phase adjustment.
+
+The full-mosaic shared-D inverse now has a concrete 41-point top-level H1 run with an interior optimum near `2.51e-3`, but its `chi2_red_min = 11.8` indicates substantial mismatch under fixed viewer-default A/V boundary forcing. This should be viewed as evidence that the global inverse scaffold is working computationally, not yet as a settled D estimate.
+
+This does not rule out noise or stitching artifacts. Rather, it suggests that the current one-parameter phase correction is too blunt to explain them. If acquisition timing matters, it may require tile-specific offsets, local overlap constraints, or a full global inverse model rather than a single linear drift across tile order.
+
 ## Recommended Next Steps
 
-1. Port the newest Somites21 phase-correlation dashboard features to Somites27.
-2. Re-run Somites21 and Somites27 Bayesian inference with `--use-second-harmonic --tile-visualization phase`.
-3. Use the correlation panel to check whether edge-to-edge phase change predicts:
+1. Treat `self_consistency.py --timing-mode none --use-second-harmonic` as the current Somites21 shared-D baseline.
+2. Use `fit_beta` and `fixed_acquisition_time` only as timing-artifact sensitivity checks unless a stronger physical phase-correction model is developed.
+3. Continue building the full global inverse problem from `global_inverse_shared_D.py`:
+   - one global pressure/flow field,
+   - one shared D initially,
+   - all tile harmonic observations included jointly,
+   - A/V boundary conditions imposed at the mosaic level,
+   - then fit or marginalize low-dimensional global A/V boundary forcing,
+   - optional tile phase offsets as nuisance parameters only after the no-correction baseline is working.
+4. Re-run `global_inverse_shared_D.py` with H1+H2 and with `--observation-source per-tile`, then compare the global optimum and residual structure against the saved top-level H1 run.
+5. Add low-dimensional fitted global A/V forcing to the global inverse before interpreting its D mode biologically.
+6. Port the newest Somites21 phase-correlation dashboard features to Somites27.
+7. Re-run Somites21 and Somites27 Bayesian inference with `--use-second-harmonic --tile-visualization phase`.
+8. Use the correlation panel to check whether edge-to-edge phase change predicts:
    - posterior curvature,
    - credible interval width,
    - likelihood-ratio width,
    - or `log10(D_hat)`.
-4. Add vessel-diameter summaries per tile and correlate diameter/diameter variance with the same inference metrics.
-5. Test a diameter-dependent D model against the current constant-D model.
-6. Treat WLS results cautiously until the noise/weight model is reviewed against measured harmonic SNR and residual structure.
-
+9. Add vessel-diameter summaries per tile and correlate diameter/diameter variance with the same inference metrics.
+10. Test a diameter-dependent D model against the current constant-D model.
+11. Treat WLS results cautiously until the noise/weight model is reviewed against measured harmonic SNR and residual structure.

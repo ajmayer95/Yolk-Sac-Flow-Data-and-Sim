@@ -23,6 +23,42 @@ Somites27:
 
 The newest phase-correlation dashboard features are currently in the Somites21 Bayesian script and the Somites21 light copy. They have not yet been ported into the Somites27 Bayesian script.
 
+Additional GNN and Bayesian analysis folders:
+
+- `Somites21_demo/PerTileFlow/gnn_edge/train_gnn_edge.py`
+- `Somites21_demo/PerTileFlow/gnn_edge_heldout/train_gnn_edge.py`
+- `Somites21_demo/PerTileFlow/gnn_edge_within/train_gnn_edge.py`
+- `Somites21_demo/PerTileFlow/gnn_edge_v2/train_gnn_edge.py`
+- `Somites21_demo/PerTileFlow/bayesian/bayesian_tile_distensibility.py`
+- `Somites21_demo/PerTileFlow/bayesian/bayesian_output_dashboard.py`
+- `Somites21_demo/PerTileFlow/bayesian/infer_bayes_default_mosaic_tile_profiles.py`
+- `Somites27_demo/PerTileFlow/gnn_edge/train_gnn_edge.py`
+
+These runs divide into two related but different families. The GNN scripts are physics-embedded flow models used to infer pressure/flow scaffolds and diagnose residual structure. The Bayesian scripts are posterior-based distensibility inference workflows. Detailed Bayesian methods are summarized in Section 3, and GNN methods/results are summarized in Section 4.
+
+Current GNN output folders used in the analysis:
+
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260614_222704/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260614_223539/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260614_231036/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260616_092543/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_within_20260615_093931/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_within_20260615_104348/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_heldout_20260615_094419/`
+- `Somites27_demo/PerTileFlow/renders/gnn_edge_dc_20260615_125237/`
+
+Current Bayesian output folders used in the analysis:
+
+- `Somites21_demo/PerTileFlow/bayesian/outputs/`
+- `Somites21_demo/PerTileFlow/renders/meeting/infer_bayes_default_mosaic_tile_profiles/`
+- `Somites27_demo/PerTileFlow/renders/meeting/infer_bayes_default_mosaic_tile_profiles/`
+
+High-level current interpretation:
+
+- The Bayesian outputs remain the primary posterior-based distensibility summaries.
+- The GNN pressure fields are best treated as scaffolds, priors, and diagnostic views rather than direct D estimates.
+- The GNN outputs are still scientifically useful because they expose pressure outliers, edge-level residual structure, harmonic error maps, and differences between whole-mosaic and tile-local pressure explanations.
+
 New Somites21 outputs generated on 2026-06-10:
 
 - `Somites21_demo/PerTileFlow/renders/meeting/self_consistency/self_consistency_summary.json`
@@ -142,6 +178,22 @@ Current output folders:
 
 - `Somites21_demo/PerTileFlow/renders/meeting/infer_bayes_default_mosaic_tile_profiles/`
 - `Somites27_demo/PerTileFlow/renders/meeting/infer_bayes_default_mosaic_tile_profiles/`
+- `Somites21_demo/PerTileFlow/bayesian/outputs/`
+
+Additional Bayesian folder workflow:
+
+```bash
+python bayesian/bayesian_tile_distensibility.py --config ../emb1/config.json
+python bayesian/bayesian_output_dashboard.py --out-dir bayesian/outputs/<run_dir>
+```
+
+Folder-specific method:
+
+- `bayesian/infer_bayes_default_mosaic_tile_profiles.py` is the dashboard-style Bayesian workflow used for measured tile data. It evaluates the marginal posterior over `D` on a log grid and writes global/tile posterior CSV files plus a standalone HTML dashboard.
+- `bayesian/bayesian_tile_distensibility.py` is a deterministic Bayesian grid-integration implementation. For each tile and each `D0` grid point, it builds a harmonic transfer operator from unknown boundary pressure phasors to observed edge-flow phasors.
+- Boundary pressure phasors are analytically marginalized under a zero-mean Gaussian prior. Nuisance scales for boundary forcing and observation noise are integrated on log grids using log-sum-exp.
+- H1 is used by default; H2 can be included with `--harmonics 1 2`. The observation vector is real-stacked so complex harmonic flow phasors contribute real and imaginary residual components.
+- `bayesian/bayesian_output_dashboard.py` reads `tile_D_posterior_curves.csv` and `tile_D_posterior_summary.csv` and writes an interactive HTML dashboard with likelihood profiles, selected-tile prior/posterior curves, and per-tile summary tables.
 
 Important caution:
 
@@ -181,7 +233,111 @@ Interpretation:
 - Periphery tiles often have slightly narrower posterior widths than interior tiles in the current summaries. This may reflect stronger boundary influence, simpler local constraints, or better measured harmonic content near larger/clearer vessels.
 - Some Somites27 H1 modes hit the grid boundary, especially in H1-only inference. H1+H2 reduces this issue.
 
-### 4. Location-Based Tile Grouping
+### 4. Physics-Embedded GNN Flow/Pressure Scaffolds
+
+Whole-mosaic scripts:
+
+```bash
+python gnn_edge/train_gnn_edge.py --config ../emb1/config.json --sweep
+python gnn_edge_v2/train_gnn_edge.py --config ../emb1/config.json --sweep
+```
+
+Tile-local scripts:
+
+```bash
+python gnn_edge_within/train_gnn_edge.py --mosaic-scaffold-dir <gnn_edge_sweep_or_run>
+python gnn_edge_heldout/train_gnn_edge.py --mosaic-scaffold-dir <gnn_edge_sweep_or_run>
+```
+
+Somites27 port:
+
+```bash
+python gnn_edge/train_gnn_edge.py --config ../../emb1/config.json --sweep
+```
+
+Purpose:
+
+- Fit a physics-embedded GNN that predicts an edge conductance correction `delta`.
+- Convert Poiseuille conductance to learned conductance using `G_hat = G_pois * exp(delta)`.
+- Solve a resistive network pressure problem and reconstruct DC flow as `Q_hat = G_hat * pressure_drop`.
+- Use the learned pressure field as a scaffold/pressure prior for later tile-profile analyses.
+- Diagnose where measured flows, vessel geometry, graph topology, and pressure consistency disagree.
+
+Core model:
+
+- Edge features include geometric/Poiseuille quantities such as radius, length, `r^4 / L`, baseline conductance, degree information, and, in v2, optional harmonic descriptors.
+- A message-passing edge GNN predicts `delta` on each edge. The exponential parameterization keeps learned conductances positive.
+- For whole-mosaic runs, the model couples the learned conductances to a pressure solve over the full graph and optimizes flow reconstruction on train edges while monitoring held-out validation edges.
+- For scaffolded tile-local runs, the whole-mosaic pressure solution is loaded from a previous GNN run. Each tile then fits only low-dimensional pressure nuisance terms around that scaffold while the shared edge model learns local conductance corrections.
+- Reported errors are in nL/s. Normalized RMSE divides RMSE by the RMS magnitude of the observed flow on the scored split.
+
+Model variants:
+
+- `gnn_edge`: whole-mosaic DC model. It trains on observed DC edge flows, solves one mosaic pressure field, and writes pressure/flow diagnostics.
+- `gnn_edge_within`: tile-local scaffolded model. It loads a whole-mosaic GNN scaffold, then trains/evaluates with held-out edges within each tile.
+- `gnn_edge_heldout`: tile-local scaffolded model with held-out tiles. It tests whether the shared correction model transfers to tiles not used for fitting.
+- `gnn_edge_v2`: harmonic-aware extension. It supports `--flow-components dc`, `--flow-components dc-h1`, and `--flow-components dc-h1-h2`. H1/H2 auxiliary losses are SNR-weighted and controlled by `--lambda-h1` and `--lambda-h2`.
+- Somites27 `gnn_edge`: port of the whole-mosaic DC workflow. It includes an observed-divergence fallback for boundary injections because Somites27 does not expose the same explicit source/sink metadata as Somites21.
+
+Main artifacts:
+
+- `metrics.csv`: aggregate train/validation RMSE, normalized RMSE, MAE, correlation, and R2.
+- `edge_predictions*.csv`: observed and predicted flow by edge, learned correction `delta`, conductance multiplier `C`, and pressure-drop diagnostics.
+- `node_pressures_physics_gnn.csv`: fitted node pressure field for the whole-mosaic GNN.
+- `diagnostics.json`: summary of correction magnitudes, conductance multipliers, and split sizes.
+- Spatial figures: pressure maps, pressure-drop maps, residual maps, predicted-versus-observed plots, conductance histograms, and, for v2, harmonic flow/error maps.
+
+Current output folders:
+
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260614_222704/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260614_223539/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260614_231036/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_dc_20260616_092543/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_within_20260615_093931/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_within_20260615_104348/`
+- `Somites21_demo/PerTileFlow/renders/gnn_edge_heldout_20260615_094419/`
+- `Somites27_demo/PerTileFlow/renders/gnn_edge_dc_20260615_125237/`
+
+Whole-mosaic DC GNN summary:
+
+| Dataset/run | Sweep size | Best run | Best val NRMSE | Best val RMSE | Median C | Max C | Comment |
+|---|---:|---|---:|---:|---:|---:|---|
+| Somites21 `gnn_edge_dc_20260614_231036` | 45 | `K3_hidden128_lambda0p0001_seed0` | `0.720` | `0.110` nL/s | `1.52` | `128` | Best older DC sweep; conductance scale remains near order 1 in the median but has high-C outliers. |
+| Somites21 `gnn_edge_dc_20260616_092543` | 20 | `K3_hidden64_lambda0p001_seed0` | `0.801` | `0.123` nL/s | `0.0071` | `16.8` | Harmonic-aware/v2-era run; useful diagnostics, but median conductance scale is much lower and should be interpreted cautiously. |
+| Somites27 `gnn_edge_dc_20260615_125237` | 4 | `K0_hidden128_lambda0p0001_seed0` | `0.138` | `0.039` nL/s | `1.27` | `102` | Small Somites27 sweep; validation flow error is substantially lower than current Somites21 sweeps. |
+
+Tile-local GNN summary:
+
+| Dataset/run | Split style | Val NRMSE | Val RMSE | Diagnostic notes |
+|---|---|---:|---:|---|
+| Somites21 `gnn_edge_within_20260615_093931` | held-out edges within tiles | `1.04` | `0.190` nL/s | Physics GNN improves strongly over Poiseuille baseline (`11.6` val NRMSE), but remains worse than the best whole-mosaic DC validation. |
+| Somites21 `gnn_edge_within_20260615_104348` | scaffolded local pressure, held-out edges | `1.25` for `scaffold_local_pressure_gnn` | `0.207` nL/s | `scale_only` baseline (`0.657` val NRMSE) outperformed the local-pressure GNN in this run; local pressure flexibility can overfit or destabilize validation. |
+| Somites21 `gnn_edge_heldout_20260615_094419` | held-out tiles | `28.0` | `6.42` nL/s | Held-out-tile generalization is poor in this run; this suggests tile-specific pressure/flow structure is not captured well by the current shared model. |
+
+Harmonic-aware GNN diagnostics:
+
+- `gnn_edge_v2` adds harmonic edge features derived from H1/H2 amplitudes, phases, and SNR.
+- H1/H2 auxiliary losses are computed on complex harmonic flow residuals and weighted by the SNR-derived flow uncertainty.
+- The current harmonic output includes `harmonic_predictions_physics_gnn.csv`, per-harmonic absolute error maps, and per-harmonic observed flow magnitude maps.
+- The maps named `harmonic_H1_flow_magnitude_map.png` and `harmonic_H2_flow_magnitude_map.png` show observed harmonic flow magnitudes, not predicted magnitudes.
+- The maps named `harmonic_H1_absolute_error_map.png` and `harmonic_H2_absolute_error_map.png` compare predicted and observed complex harmonic flows.
+- The current v2 model does not solve a harmonic pressure field. Harmonic pressure maps and harmonic pressure-drop maps would require an additional harmonic pressure model or an explicit complex network solve.
+
+Pressure-map outlier analysis:
+
+- Some whole-mosaic Somites21 GNN runs produced very high or very low pressure outliers that visually dominated pressure spatial maps.
+- Additional filtered maps were generated for selected runs by removing the single highest-pressure node, and separately by removing the ten highest and ten lowest pressure nodes.
+- These filtered maps are visualization-only diagnostics. They should not be interpreted as refit models; they reveal lower-pressure spatial variation that is otherwise compressed by the color scale.
+
+Interpretation:
+
+- The whole-mosaic GNNs are useful pressure/flow scaffolds and produce interpretable residual, pressure, conductance, and topology diagnostics.
+- The GNN outputs should not be treated as direct estimates of distensibility `D`; they fit conductance corrections and pressure fields, not compliance dynamics.
+- GNN pressure fields are useful as priors for frequentist tile-profile scans because they partially remove the pressure nuisance-parameter ambiguity.
+- Tile-local GNN results show that generalization is harder than edge-level interpolation: held-out-tile performance can be poor, and local pressure nuisance terms can dominate.
+- Harmonic-aware GNN results are promising as diagnostics, but the harmonic component is currently an auxiliary flow-prediction head rather than a full harmonic pressure solver.
+
+### 5. Location-Based Tile Grouping
 
 Argument:
 
@@ -202,7 +358,7 @@ Comments:
 - This does not mean location is irrelevant; it means the current coarse grouping may not align with the dominant sources of variability.
 - More local features may matter more: vessel diameter, harmonic SNR, edge-to-edge phase jumps, boundary proximity, and graph topology.
 
-### 5. H1 Versus H1+H2 Sensitivity
+### 6. H1 Versus H1+H2 Sensitivity
 
 Argument:
 
@@ -220,7 +376,7 @@ Current comment:
 - H1+H2 also tends to lower median D_hat relative to H1-only in both datasets.
 - This is potentially informative, but it should be interpreted with care. If H2 is more sensitive to nonlinearities, waveform shape, phase measurement error, or model mismatch, it may constrain D while also revealing limitations of the current model.
 
-### 6. Tile Phase and Harmonic Visualization
+### 7. Tile Phase and Harmonic Visualization
 
 Somites21 command:
 
@@ -253,7 +409,7 @@ Comments:
 - Phase over time animates the fitted harmonic signal through one cycle.
 - Large phase variation in large-diameter vessels may indicate that diameter-dependent compliance, waveform propagation, or measurement dominance from large vessels should be considered.
 
-### 7. Contour and Smooth Phase Gradient Experiments
+### 8. Contour and Smooth Phase Gradient Experiments
 
 Methods attempted:
 
@@ -268,7 +424,7 @@ Comments:
 - The robust phase-plane view is cleaner, but it is still a visualization aid rather than direct evidence of constant distensibility.
 - The main lesson was that phase often appears piecewise or edge-to-edge heterogeneous rather than smoothly varying within each vessel segment.
 
-### 8. Within-Edge Phase Gradient
+### 9. Within-Edge Phase Gradient
 
 Method:
 
@@ -281,7 +437,7 @@ Comments:
 - This suggests phase does not necessarily change much along individual segmented edges.
 - The more interesting behavior appears to be phase changes between adjacent edges or across junctions.
 
-### 9. Edge-to-Edge Phase Change
+### 10. Edge-to-Edge Phase Change
 
 Method:
 
@@ -307,7 +463,7 @@ Current Somites21 H1 phase-change summary from that file:
 | H1 edge jump p90 | `1.25` rad | `2.25` rad | `2.80` rad |
 | H1 edge jump p90 normalized | `28.8` rad/mm | `43.4` rad/mm | `60.0` rad/mm |
 
-### 10. Phase Change Versus Distensibility Identifiability
+### 11. Phase Change Versus Distensibility Identifiability
 
 Current Somites21 dashboard panel:
 
@@ -336,7 +492,7 @@ Somites27 status:
 - The same phase-correlation panel has not yet been ported into the Somites27 Bayesian script.
 - Somites27 has Bayesian H1 and H1+H2 posterior outputs, but not the latest tile phase-identifiability metrics in the main output folder.
 
-### 11. Shared-D Self-Consistency and Tile-Order Phase Correction
+### 12. Shared-D Self-Consistency and Tile-Order Phase Correction
 
 Script:
 
@@ -401,7 +557,7 @@ Important limitation:
 
 - The self-consistency script still does not solve the full global pressure inverse problem. It multiplies tile-level marginal likelihoods and separately analyzes overlap phase consistency. It does not yet fit one global pressure/flow field to all measured tile observations simultaneously.
 
-### 12. First-Pass Full-Mosaic Shared-D Inverse
+### 13. First-Pass Full-Mosaic Shared-D Inverse
 
 Script:
 

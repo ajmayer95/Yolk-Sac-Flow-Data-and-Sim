@@ -1,6 +1,0 @@
-D,chi2,delta_chi2,objective,observation_source,tile_group,weight_mode
-1e-06,2465.062895494871,91.32759512705661,weighted_least_squares,measured_graph,interior,sigma
-1.778279410038923e-05,2464.4231157978757,90.68781543006116,weighted_least_squares,measured_graph,interior,sigma
-0.00031622776601683794,2453.287828242026,79.55252787421159,weighted_least_squares,measured_graph,interior,sigma
-0.005623413251903491,2373.7353003678145,0.0,weighted_least_squares,measured_graph,interior,sigma
-0.1,3502.3236897074125,1128.588389339598,weighted_least_squares,measured_graph,interior,sigma

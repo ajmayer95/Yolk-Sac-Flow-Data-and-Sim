@@ -1,6 +1,6 @@
 # Distensibility Analysis Methods and Current Results
 
-Date: 2026-06-10
+Date: 2026-06-18
 
 This note summarizes the methods attempted so far for the Somites21 and Somites27 yolk-sac mosaic datasets, with comments on what the current results suggest about distensibility. The emphasis is on tile-by-tile recovery/inference, profile likelihood/posterior shape, and phase-based diagnostics.
 
@@ -29,6 +29,9 @@ Additional GNN and Bayesian analysis folders:
 - `Somites21_demo/PerTileFlow/gnn_edge_heldout/train_gnn_edge.py`
 - `Somites21_demo/PerTileFlow/gnn_edge_within/train_gnn_edge.py`
 - `Somites21_demo/PerTileFlow/gnn_edge_v2/train_gnn_edge.py`
+- `Somites21_demo/PerTileFlow/gnn_synthetic/run_distensibility_workflow.sh`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/run_distensibility_workflow.sh`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v3/run_distensibility_workflow.sh`
 - `Somites21_demo/PerTileFlow/bayesian/bayesian_tile_distensibility.py`
 - `Somites21_demo/PerTileFlow/bayesian/bayesian_output_dashboard.py`
 - `Somites21_demo/PerTileFlow/bayesian/infer_bayes_default_mosaic_tile_profiles.py`
@@ -46,6 +49,15 @@ Current GNN output folders used in the analysis:
 - `Somites21_demo/PerTileFlow/renders/gnn_edge_within_20260615_104348/`
 - `Somites21_demo/PerTileFlow/renders/gnn_edge_heldout_20260615_094419/`
 - `Somites27_demo/PerTileFlow/renders/gnn_edge_dc_20260615_125237/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic/d0p0001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic/d0p001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic/d0p01_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/d0p0001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/d0p001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/d0p01_results/`
+
+`gnn_synthetic_v3` currently contains the velocity-observation workflow code, but
+no saved `d*_results` folders were present at the time of this update.
 
 Current Bayesian output folders used in the analysis:
 
@@ -336,6 +348,105 @@ Interpretation:
 - GNN pressure fields are useful as priors for frequentist tile-profile scans because they partially remove the pressure nuisance-parameter ambiguity.
 - Tile-local GNN results show that generalization is harder than edge-level interpolation: held-out-tile performance can be poor, and local pressure nuisance terms can dominate.
 - Harmonic-aware GNN results are promising as diagnostics, but the harmonic component is currently an auxiliary flow-prediction head rather than a full harmonic pressure solver.
+
+### 4b. Synthetic GNN-to-Distensibility Recovery Workflows
+
+Workflow scripts:
+
+```bash
+cd Somites21_demo/PerTileFlow/gnn_synthetic
+./run_distensibility_workflow.sh --device mps --d-values "1e-4 1e-3 1e-2"
+
+cd Somites21_demo/PerTileFlow/gnn_synthetic_v2
+./run_distensibility_workflow.sh --device mps --d-values "1e-4 1e-3 1e-2"
+
+cd Somites21_demo/PerTileFlow/gnn_synthetic_v3
+./run_distensibility_workflow.sh --device mps --d-values "1e-4 1e-3 1e-2"
+```
+
+Purpose:
+
+- Run a whole-mosaic synthetic simulation at a known distensibility value.
+- Write a synthetic graph with edge observations.
+- Train a physics-embedded GNN on the synthetic graph.
+- Use the validated GNN pressure field as the pressure prior for tile-local
+  profile-likelihood recovery.
+- Check whether the GNN + linear solve workflow recovers the imposed `D`.
+
+Version definitions:
+
+- `gnn_synthetic`: original synthetic workflow. The GNN is trained on
+  volumetric DC flow `Q_obs`, writes outputs under `gnn_edge_dc`, and downstream
+  tile inference profiles flow observations.
+- `gnn_synthetic_v2`: velocity-observation workflow. The pressure solve still
+  conserves volumetric flow using `G_hat`, but the GNN loss compares
+  `v_hat = Q_hat / (pi r^2)` against direct synthetic velocity metadata. Outputs
+  are written under `gnn_edge_velocity_dc`.
+- `gnn_synthetic_v3`: current code copy of the velocity-observation workflow.
+  No completed `d*_results` output folders were present when this report was
+  updated, so v3 is listed as code-ready but not result-backed.
+
+Important formulation point:
+
+For the tile-profile likelihood, the velocity observation model is algebraically
+equivalent to the flow observation model when velocity is generated from the
+same synthetic flow and the uncertainty is converted consistently:
+
+```text
+v_e = Q_e / A_e
+T_v,e = T_q,e / A_e
+sigma_v,e = sigma_q,e / A_e
+
+(v_obs - T_v P) / sigma_v
+  = (Q_obs - T_q P) / sigma_q
+```
+
+Therefore, identical distensibility profiles for `gnn_synthetic` and
+`gnn_synthetic_v2` are expected in this controlled synthetic setting. The GNN
+training metrics differ because the optimized target is in different units, but
+the downstream normalized residuals carry the same information.
+
+Current synthetic result folders:
+
+- `Somites21_demo/PerTileFlow/gnn_synthetic/d0p0001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic/d0p001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic/d0p01_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/d0p0001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/d0p001_results/`
+- `Somites21_demo/PerTileFlow/gnn_synthetic_v2/d0p01_results/`
+
+Current synthetic recovery summary:
+
+| Workflow | Imposed D | GNN target | Validated GNN metric | GNN mass residual norm | Global profile D_hat | Median tile D_hat | Tiles |
+|---|---:|---|---:|---:|---:|---:|---:|
+| `gnn_synthetic` | `1.0e-4` | flow | val NRMSE `0.0141`, val RMSE `4.44e-4` nL/s | `3.14e-3` | `5.62e-4` | `2.37e-4` | 53 |
+| `gnn_synthetic` | `1.0e-3` | flow | val NRMSE `0.0141`, val RMSE `4.41e-4` nL/s | `3.03e-3` | `7.50e-4` | `1.00e-3` | 53 |
+| `gnn_synthetic` | `1.0e-2` | flow | val NRMSE `0.0131`, val RMSE `4.12e-4` nL/s | `1.54e-3` | `4.22e-3` | `1.00e-2` | 53 |
+| `gnn_synthetic_v2` | `1.0e-4` | velocity | val NRMSE_v `1.05`, val RMSE_v `5.66e-3` mm/s | `3.06e-3` | `5.62e-4` | `2.37e-4` | 53 |
+| `gnn_synthetic_v2` | `1.0e-3` | velocity | val NRMSE_v `1.05`, val RMSE_v `5.66e-3` mm/s | `3.02e-3` | `7.50e-4` | `1.00e-3` | 53 |
+| `gnn_synthetic_v2` | `1.0e-2` | velocity | val NRMSE_v `1.05`, val RMSE_v `5.66e-3` mm/s | `3.03e-3` | `4.22e-3` | `1.00e-2` | 53 |
+
+Interpretation:
+
+- The flow and velocity workflows produce identical downstream `D_hat` values
+  for all currently saved synthetic tests. This is expected, not a failure,
+  because the velocity observations were generated from the same synthetic flow
+  field and the likelihood scales both prediction and uncertainty by edge area.
+- The tile-median recovery is exact for the `1e-3` and `1e-2` synthetic runs,
+  while the global summed profile is biased lower for larger imposed `D` and
+  biased upward for the `1e-4` run. This suggests the tile-median summary is
+  currently more faithful than the summed global profile in this GNN-prior
+  synthetic setup.
+- The `1e-4` run is harder: the median tile recovery shifts upward from
+  `1.0e-4` to `2.37e-4`, and the summed global profile lands at `5.62e-4`.
+  This likely reflects profile flatness/noise-floor effects and pressure-prior
+  sensitivity at low distensibility rather than a flow-versus-velocity issue.
+- The GNN pressure solve remains flow-conserving in v2/v3. Velocity is only the
+  observation/readout variable; nodal conservation is still applied to
+  volumetric `Q`.
+- A genuine difference between flow- and velocity-based inference would require
+  independent velocity measurements, a native velocity noise model that is not
+  simply `sigma_Q / A`, radius/area uncertainty, or a changed GNN pressure prior.
 
 ### 5. Location-Based Tile Grouping
 

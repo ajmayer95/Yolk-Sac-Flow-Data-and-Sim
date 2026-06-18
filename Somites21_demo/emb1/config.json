@@ -1,7 +1,0 @@
-{
-    "mosaic_graph": "analyzed/mosaic_graph_analyzed.gpickle",
-    "mosaic_tiff": "analyzed/stitched_linear.tif",
-    "tile_positions": "analyzed/tile_positions_manual.json",
-    "video_dir": "videos",
-    "video_pattern": "10x 250fps loc{vid}_C001H001S0001"
-}

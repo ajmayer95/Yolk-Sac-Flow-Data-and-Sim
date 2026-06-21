@@ -1,0 +1,8 @@
+Project: /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim
+Train root: /mnt/home/sswee/ceph/Somites27_demo
+Test root: /mnt/home/sswee/ceph/Somites21_demo
+Train labels: /mnt/home/sswee/ceph/Somites27_demo/emb1/analyzed/stitched_linear.tif
+Test labels: /mnt/home/sswee/ceph/Somites21_demo/emb1/analyzed/stitched_linear.tif
+Work dir: /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/work
+Report dir: /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/outputs
+Seed: 7

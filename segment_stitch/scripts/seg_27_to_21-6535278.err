@@ -1,0 +1,112 @@
+WARNING: using stitched_linear.tif as the full-mosaic label source.
+2026-06-21 00:27:38,133 INFO: Using train mosaic labels: /mnt/ceph/users/sswee/Somites27_demo/emb1/analyzed/stitched_linear.tif
+2026-06-21 00:27:38,133 INFO: Using test mosaic labels: /mnt/ceph/users/sswee/Somites21_demo/emb1/analyzed/stitched_linear.tif
+2026-06-21 00:27:38,133 INFO: Generating projections
+2026-06-21 00:27:38,848 INFO: Computing projections for tile 10 from 10x 250fps loc10_C001H001S0001.tif
+2026-06-21 00:27:40,511 INFO: Computing projections for tile 11 from 10x 250fps loc11_C001H001S0001.tif
+2026-06-21 00:27:41,861 INFO: Computing projections for tile 12 from 10x 250fps loc12_C001H001S0001.tif
+2026-06-21 00:27:43,299 INFO: Computing projections for tile 13 from 10x 250fps loc13_C001H001S0001.tif
+2026-06-21 00:27:44,876 INFO: Computing projections for tile 16 from 10x 250fps loc16_C001H001S0001.tif
+2026-06-21 00:27:46,250 INFO: Computing projections for tile 17 from 10x 250fps loc17_C001H001S0001.tif
+2026-06-21 00:27:47,647 INFO: Computing projections for tile 18 from 10x 250fps loc18_C001H001S0001.tif
+2026-06-21 00:27:49,060 INFO: Computing projections for tile 19 from 10x 250fps loc19_C001H001S0001.tif
+2026-06-21 00:27:50,466 INFO: Computing projections for tile 20 from 10x 250fps loc20_C001H001S0001.tif
+2026-06-21 00:27:51,900 INFO: Computing projections for tile 21 from 10x 250fps loc21_C001H001S0001.tif
+2026-06-21 00:27:53,411 INFO: Computing projections for tile 22 from 10x 250fps loc22_C001H001S0001.tif
+2026-06-21 00:27:54,818 INFO: Computing projections for tile 23 from 10x 250fps loc23_C001H001S0001.tif
+2026-06-21 00:27:56,279 INFO: Computing projections for tile 25 from 10x 250fps loc25_C001H001S0001.tif
+2026-06-21 00:27:57,683 INFO: Computing projections for tile 26 from 10x 250fps loc26_C001H001S0001.tif
+2026-06-21 00:27:59,011 INFO: Computing projections for tile 28 from 10x 250fps loc28_C001H001S0001.tif
+2026-06-21 00:28:00,465 INFO: Computing projections for tile 2 from 10x 250fps loc2_C001H001S0001.tif
+2026-06-21 00:28:01,940 INFO: Computing projections for tile 30 from 10x 250fps loc30_C001H001S0001.tif
+2026-06-21 00:28:03,296 INFO: Computing projections for tile 34 from 10x 250fps loc34_C001H001S0001.tif
+2026-06-21 00:28:04,871 INFO: Computing projections for tile 35 from 10x 250fps loc35_C001H001S0001.tif
+2026-06-21 00:28:06,302 INFO: Computing projections for tile 36 from 10x 250fps loc36_C001H001S0001.tif
+2026-06-21 00:28:07,830 INFO: Computing projections for tile 37 from 10x 250fps loc37_C001H001S0001.tif
+2026-06-21 00:28:09,280 INFO: Computing projections for tile 38 from 10x 250fps loc38_C001H001S0001.tif
+2026-06-21 00:28:10,599 INFO: Computing projections for tile 3 from 10x 250fps loc3_C001H001S0001.tif
+2026-06-21 00:28:12,079 INFO: Computing projections for tile 40 from 10x 250fps loc40_C001H001S0001.tif
+2026-06-21 00:28:13,529 INFO: Computing projections for tile 43 from 10x 250fps loc43_C001H001S0001.tif
+2026-06-21 00:28:15,003 INFO: Computing projections for tile 44 from 10x 250fps loc44_C001H001S0001.tif
+2026-06-21 00:28:16,336 INFO: Computing projections for tile 45 from 10x 250fps loc45_C001H001S0001.tif
+2026-06-21 00:28:17,804 INFO: Computing projections for tile 47 from 10x 250fps loc47_C001H001S0001.tif
+2026-06-21 00:28:19,269 INFO: Computing projections for tile 48 from 10x 250fps loc48_C001H001S0001.tif
+2026-06-21 00:28:20,661 INFO: Computing projections for tile 4 from 10x 250fps loc4_C001H001S0001.tif
+2026-06-21 00:28:22,061 INFO: Computing projections for tile 50 from 10x 250fps loc50_C001H001S0001.tif
+2026-06-21 00:28:23,677 INFO: Computing projections for tile 52 from 10x 250fps loc52_C001H001S0001.tif
+2026-06-21 00:28:25,544 INFO: Computing projections for tile 53 from 10x 250fps loc53_C001H001S0001.tif
+2026-06-21 00:28:27,136 INFO: Computing projections for tile 54 from 10x 250fps loc54_C001H001S0001.tif
+2026-06-21 00:28:28,860 INFO: Computing projections for tile 55 from 10x 250fps loc55_C001H001S0001.tif
+2026-06-21 00:28:30,506 INFO: Computing projections for tile 5 from 10x 250fps loc5_C001H001S0001.tif
+2026-06-21 00:28:31,934 INFO: Computing projections for tile 64 from 10x 250fps loc64_C001H001S0001.tif
+2026-06-21 00:28:33,483 INFO: Computing projections for tile 65 from 10x 250fps loc65_C001H001S0001.tif
+2026-06-21 00:28:35,192 INFO: Computing projections for tile 66 from 10x 250fps loc66_C001H001S0001.tif
+2026-06-21 00:28:36,772 INFO: Computing projections for tile 67 from 10x 250fps loc67_C001H001S0001.tif
+2026-06-21 00:28:38,539 INFO: Computing projections for tile 72 from 10x 250fps loc72_C001H001S0001.tif
+2026-06-21 00:28:40,164 INFO: Computing projections for tile 9 from 10x 250fps loc9_C001H001S0001.tif
+2026-06-21 00:28:41,669 INFO: Extracting supervised tile masks from mosaic labels
+2026-06-21 00:28:42,176 INFO: Loaded mosaic labels from /mnt/ceph/users/sswee/Somites27_demo/emb1/analyzed/stitched_linear.tif with shape (5593, 4213)
+2026-06-21 00:28:42,433 INFO: Using mosaic label offset y/x = 2675.99, 1294.71
+2026-06-21 00:28:42,723 INFO: Loaded mosaic labels from /mnt/ceph/users/sswee/Somites21_demo/emb1/analyzed/stitched_linear.tif with shape (2923, 3699)
+2026-06-21 00:28:42,967 INFO: Using mosaic label offset y/x = 1128.64, -0.00
+2026-06-21 00:28:42,967 INFO: Training U-Net
+2026-06-21 00:28:44,751 INFO: generated new fontManager
+2026-06-21 00:28:51,035 INFO: Selected device: cuda
+/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/train_unet.py:106: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/train_unet.py:117: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=device.type == "cuda"):
+2026-06-21 00:28:52,515 INFO: epoch=001 train_loss=0.7099 val_loss=0.3085
+2026-06-21 00:28:53,014 INFO: epoch=002 train_loss=0.3027 val_loss=0.2529
+2026-06-21 00:28:53,506 INFO: epoch=003 train_loss=0.2651 val_loss=0.2240
+2026-06-21 00:28:54,005 INFO: epoch=004 train_loss=0.2405 val_loss=0.2029
+2026-06-21 00:28:54,491 INFO: epoch=005 train_loss=0.2219 val_loss=0.1851
+2026-06-21 00:28:54,986 INFO: epoch=006 train_loss=0.2061 val_loss=0.1702
+2026-06-21 00:28:55,473 INFO: epoch=007 train_loss=0.1920 val_loss=0.1555
+2026-06-21 00:28:55,982 INFO: epoch=008 train_loss=0.1789 val_loss=0.1429
+2026-06-21 00:28:56,497 INFO: epoch=009 train_loss=0.1673 val_loss=0.1313
+2026-06-21 00:28:56,991 INFO: epoch=010 train_loss=0.1575 val_loss=0.1209
+2026-06-21 00:28:57,495 INFO: epoch=011 train_loss=0.1483 val_loss=0.1123
+2026-06-21 00:28:58,007 INFO: epoch=012 train_loss=0.1401 val_loss=0.1038
+2026-06-21 00:28:58,499 INFO: epoch=013 train_loss=0.1329 val_loss=0.0970
+2026-06-21 00:28:58,996 INFO: epoch=014 train_loss=0.1261 val_loss=0.0901
+2026-06-21 00:28:59,514 INFO: epoch=015 train_loss=0.1205 val_loss=0.0853
+2026-06-21 00:29:00,009 INFO: epoch=016 train_loss=0.1168 val_loss=0.0776
+2026-06-21 00:29:00,514 INFO: epoch=017 train_loss=0.1109 val_loss=0.0731
+2026-06-21 00:29:01,022 INFO: epoch=018 train_loss=0.1082 val_loss=0.0688
+2026-06-21 00:29:01,515 INFO: epoch=019 train_loss=0.1044 val_loss=0.0669
+2026-06-21 00:29:02,013 INFO: epoch=020 train_loss=0.1007 val_loss=0.0632
+2026-06-21 00:29:02,528 INFO: epoch=021 train_loss=0.0972 val_loss=0.0591
+2026-06-21 00:29:03,014 INFO: epoch=022 train_loss=0.0944 val_loss=0.0570
+2026-06-21 00:29:03,506 INFO: epoch=023 train_loss=0.0912 val_loss=0.0546
+2026-06-21 00:29:04,009 INFO: epoch=024 train_loss=0.0887 val_loss=0.0523
+2026-06-21 00:29:04,502 INFO: epoch=025 train_loss=0.0875 val_loss=0.0485
+2026-06-21 00:29:04,997 INFO: epoch=026 train_loss=0.0840 val_loss=0.0488
+2026-06-21 00:29:05,472 INFO: epoch=027 train_loss=0.0819 val_loss=0.0462
+2026-06-21 00:29:05,999 INFO: epoch=028 train_loss=0.0796 val_loss=0.0498
+2026-06-21 00:29:06,453 INFO: epoch=029 train_loss=0.0773 val_loss=0.0457
+2026-06-21 00:29:06,954 INFO: epoch=030 train_loss=0.0766 val_loss=0.0416
+2026-06-21 00:29:07,439 INFO: epoch=031 train_loss=0.0793 val_loss=0.0411
+2026-06-21 00:29:07,928 INFO: epoch=032 train_loss=0.0739 val_loss=0.0547
+2026-06-21 00:29:08,389 INFO: epoch=033 train_loss=0.0864 val_loss=0.0351
+2026-06-21 00:29:08,888 INFO: epoch=034 train_loss=0.0798 val_loss=0.0319
+2026-06-21 00:29:09,417 INFO: epoch=035 train_loss=0.0754 val_loss=0.0322
+2026-06-21 00:29:09,875 INFO: epoch=036 train_loss=0.0743 val_loss=0.0329
+2026-06-21 00:29:10,321 INFO: epoch=037 train_loss=0.0737 val_loss=0.0311
+2026-06-21 00:29:10,811 INFO: epoch=038 train_loss=0.0710 val_loss=0.0314
+2026-06-21 00:29:11,265 INFO: epoch=039 train_loss=0.0693 val_loss=0.0306
+2026-06-21 00:29:11,762 INFO: epoch=040 train_loss=0.0694 val_loss=0.0286
+2026-06-21 00:29:12,257 INFO: epoch=041 train_loss=0.0688 val_loss=0.0323
+2026-06-21 00:29:12,712 INFO: epoch=042 train_loss=0.0675 val_loss=0.0294
+2026-06-21 00:29:13,168 INFO: epoch=043 train_loss=0.0664 val_loss=0.0264
+2026-06-21 00:29:13,663 INFO: epoch=044 train_loss=0.0646 val_loss=0.0262
+2026-06-21 00:29:14,148 INFO: epoch=045 train_loss=0.0622 val_loss=0.0255
+2026-06-21 00:29:14,634 INFO: epoch=046 train_loss=0.0602 val_loss=0.0272
+2026-06-21 00:29:15,078 INFO: epoch=047 train_loss=0.0589 val_loss=0.0319
+2026-06-21 00:29:15,528 INFO: epoch=048 train_loss=0.0696 val_loss=0.0312
+2026-06-21 00:29:15,968 INFO: epoch=049 train_loss=0.0628 val_loss=0.0299
+2026-06-21 00:29:16,419 INFO: epoch=050 train_loss=0.0603 val_loss=0.0287
+2026-06-21 00:29:16,572 INFO: Predicting test-set masks
+2026-06-21 00:29:24,822 INFO: Stitching test mosaic with manual positions
+2026-06-21 00:29:26,759 INFO: Evaluating segmentation and stitching
+INFO: QC report written to /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/outputs/Somites21/QC_REPORT.md

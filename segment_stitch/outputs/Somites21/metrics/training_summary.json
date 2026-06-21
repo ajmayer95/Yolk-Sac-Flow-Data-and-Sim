@@ -1,0 +1,4 @@
+{
+  "best_val_loss": 0.02554476447403431,
+  "best_model": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/work/checkpoints/best_model.pt"
+}

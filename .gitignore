@@ -2,6 +2,15 @@ Somites21_demo/
 Somites27_demo/
 Somites21_demo.zip
 Somites27_demo.zip
+
+# Generated microscopy arrays and image stacks
+*.npy
+*.tif
+*.tiff
+
+# Tile-specific QC/render images; keep aggregate report plots trackable.
+tile_*.png
+*_tile_*.png
 Somites15_demo/
 Somites21_demo/
 Somites27_demo/

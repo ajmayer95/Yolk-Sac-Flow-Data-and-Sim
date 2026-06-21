@@ -1,0 +1,14 @@
+{
+  "normalized_cross_correlation": 0.17318607866764069,
+  "mean_absolute_error": 0.3085961546024127,
+  "overlap_coverage_fraction": 0.34541823777531644,
+  "ssim": 0.15112486609044384,
+  "mask_coverage_fraction": 0.3106026427784901,
+  "mosaic_mask_dice": 0.5155092743247646,
+  "mosaic_mask_iou": 0.34726338494993325,
+  "mosaic_mask_precision": 1.0,
+  "mosaic_mask_recall": 0.34726338494993325,
+  "mosaic_mask_f1": 0.5155092743247646,
+  "mosaic_mask_pixel_accuracy": 0.41617306500059764,
+  "mosaic_mask_ssim": 0.4065679066678966
+}

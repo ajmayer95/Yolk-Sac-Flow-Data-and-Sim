@@ -2,7 +2,7 @@
 
 ## Key Metrics
 
-- Best validation loss: `0.02554476447403431`
+- Best validation loss: `0.03752843290567398`
 - Tile Dice: `0.9948215634998185`
 - Tile IoU: `0.9907440053436156`
 - Stitched mask Dice: `0.38433603218835316`

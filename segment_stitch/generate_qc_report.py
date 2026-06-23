@@ -89,7 +89,11 @@ def recompute_stitching_metrics(output_dir: Path, dataset: str, reference_path: 
     summary = {}
     if reference_path and reference_path.exists() and proj_path.exists():
         reference = _load_image(reference_path)
-        summary.update(image_metrics(_load_image(proj_path), reference))
+        summary.update({
+            "projection_prediction_path": str(proj_path),
+            "projection_ground_truth_path": str(reference_path),
+        })
+        summary.update({f"projection_{k}": v for k, v in image_metrics(_load_image(proj_path), reference).items()})
     if mask_path.exists():
         mask = np.asarray(_load_image(mask_path)) > 0
         summary["mask_coverage_fraction"] = float(mask.mean())
@@ -97,6 +101,10 @@ def recompute_stitching_metrics(output_dir: Path, dataset: str, reference_path: 
             reference_mask = np.asarray(_load_image(reference_path)) > 0
             h = min(mask.shape[0], reference_mask.shape[0])
             w = min(mask.shape[1], reference_mask.shape[1])
+            summary.update({
+                "mask_prediction_path": str(mask_path),
+                "mask_ground_truth_path": str(reference_path),
+            })
             summary.update({f"mosaic_mask_{k}": v for k, v in binary_metrics(mask[:h, :w], reference_mask[:h, :w]).items()})
             try:
                 from skimage.metrics import structural_similarity
@@ -228,25 +236,42 @@ def make_stitched_qc(output_dir: Path, dataset: str, qc_dir: Path, reference_pat
     stitched_dir = output_dir / "stitched" / dataset
     proj_path = stitched_dir / "stitched_projection_manual.tif"
     mask_path = stitched_dir / "stitched_mask_manual.tif"
-    overlay_path = stitched_dir / "stitched_overlay_manual.png"
     if not proj_path.exists() and not mask_path.exists():
         return None
     panels = []
     if proj_path.exists():
-        panels.append(("stitched projection", _normalize01(_load_image(proj_path)), "gray"))
-    if mask_path.exists():
-        panels.append(("stitched mask", np.asarray(_load_image(mask_path)) > 0, "gray"))
+        panels.append((
+            "Prediction: stitched projection\n(manual tile placement)",
+            _normalize01(_load_image(proj_path)),
+            "gray",
+        ))
     if reference_path and reference_path.exists():
-        panels.append(("reference/target mosaic", _normalize01(_load_image(reference_path)), "gray"))
-    if overlay_path.exists():
-        panels.append(("overlay", __import__("matplotlib.image").image.imread(overlay_path), None))
+        reference = _load_image(reference_path)
+        panels.append((
+            "Reference: provided stitched mosaic\n(stitched_linear.tif)",
+            _normalize01(reference),
+            "gray",
+        ))
+    if mask_path.exists():
+        panels.append((
+            "Prediction: stitched mask\n(model tile masks + manual placement)",
+            np.asarray(_load_image(mask_path)) > 0,
+            "gray",
+        ))
+    if reference_path and reference_path.exists():
+        panels.append((
+            "Ground truth/target for mask metrics\n(binarized reference mosaic)",
+            np.asarray(_load_image(reference_path)) > 0,
+            "gray",
+        ))
     path = qc_dir / "stitched_qc_panel.png"
-    fig, axes = plt.subplots(1, len(panels), figsize=(5 * len(panels), 5))
+    fig, axes = plt.subplots(1, len(panels), figsize=(5.2 * len(panels), 5.4))
     axes = np.atleast_1d(axes)
     for ax, (title, arr, cmap) in zip(axes, panels):
         ax.imshow(arr, cmap=cmap)
         ax.set_title(title)
         ax.axis("off")
+    fig.suptitle("Stitched Mosaic QC: prediction vs reference/target", y=1.02)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -276,7 +301,7 @@ def write_markdown_report(output_dir: Path, dataset: str, qc_dir: Path, generate
         f"- Tile IoU: `{seg_summary.get('iou', 'NA')}`",
         f"- Stitched mask Dice: `{stitch_summary.get('mosaic_mask_dice', 'NA')}`",
         f"- Stitched mask IoU: `{stitch_summary.get('mosaic_mask_iou', 'NA')}`",
-        f"- Stitched projection SSIM: `{stitch_summary.get('ssim', 'NA')}`",
+        f"- Stitched projection SSIM: `{stitch_summary.get('projection_ssim', stitch_summary.get('ssim', 'NA'))}`",
         "",
         "## Generated Plots",
         "",

@@ -1,4 +1,4 @@
-"""Evaluate stitched mosaics against the provided stitched_linear.tif reference."""
+"""Evaluate stitched projection and stitched predicted mask mosaics."""
 
 from __future__ import annotations
 
@@ -45,9 +45,17 @@ def evaluate(args: argparse.Namespace) -> dict[str, float | None]:
     paths = resolve_dataset_paths(args.data_root)
     out_root = Path(args.output_dir)
     stitch_dir = out_root / "stitched" / tag
-    pred = load_tiff(stitch_dir / "stitched_projection_manual.tif")
-    ref = load_tiff(paths.stitched_path)
-    summary = image_metrics(pred, ref)
+
+    stitched_projection_path = stitch_dir / "stitched_projection_manual.tif"
+    reference_projection_path = paths.stitched_path
+    stitched_projection = load_tiff(stitched_projection_path)
+    reference_projection = load_tiff(reference_projection_path)
+    summary = {
+        "projection_prediction_path": str(stitched_projection_path),
+        "projection_ground_truth_path": str(reference_projection_path),
+    }
+    summary.update({f"projection_{k}": v for k, v in image_metrics(stitched_projection, reference_projection).items()})
+
     mask_path = stitch_dir / "stitched_mask_manual.tif"
     mask = load_tiff(mask_path) if mask_path.exists() else None
     summary.update(boundary_continuity(mask))
@@ -57,6 +65,10 @@ def evaluate(args: argparse.Namespace) -> dict[str, float | None]:
         pred_mask = np.asarray(mask) > 0
         h = min(pred_mask.shape[0], label_mask.shape[0])
         w = min(pred_mask.shape[1], label_mask.shape[1])
+        summary.update({
+            "mask_prediction_path": str(mask_path),
+            "mask_ground_truth_path": str(labels_path),
+        })
         summary.update({f"mosaic_mask_{k}": v for k, v in binary_metrics(pred_mask[:h, :w], label_mask[:h, :w]).items()})
         try:
             from skimage.metrics import structural_similarity

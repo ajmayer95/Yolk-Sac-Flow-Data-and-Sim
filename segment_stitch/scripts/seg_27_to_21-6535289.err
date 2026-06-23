@@ -1,0 +1,69 @@
+WARNING: using stitched_linear.tif as the full-mosaic label source.
+2026-06-21 00:59:00,696 INFO: Using train mosaic labels: /mnt/ceph/users/sswee/Somites27_demo/emb1/analyzed/stitched_linear.tif
+2026-06-21 00:59:00,696 INFO: Using test mosaic labels: /mnt/ceph/users/sswee/Somites21_demo/emb1/analyzed/stitched_linear.tif
+2026-06-21 00:59:00,696 INFO: Generating projections
+2026-06-21 00:59:00,866 INFO: Extracting supervised tile masks from mosaic labels
+2026-06-21 00:59:01,266 INFO: Loaded mosaic labels from /mnt/ceph/users/sswee/Somites27_demo/emb1/analyzed/stitched_linear.tif with shape (5593, 4213)
+2026-06-21 00:59:01,783 INFO: Using mosaic label offset y/x = 2675.99, 1294.71
+2026-06-21 00:59:02,053 INFO: Loaded mosaic labels from /mnt/ceph/users/sswee/Somites21_demo/emb1/analyzed/stitched_linear.tif with shape (2923, 3699)
+2026-06-21 00:59:02,570 INFO: Using mosaic label offset y/x = 1128.64, -0.00
+2026-06-21 00:59:02,571 INFO: Training U-Net
+2026-06-21 00:59:05,106 INFO: Selected device: cuda
+/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/train_unet.py:106: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/train_unet.py:117: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=device.type == "cuda"):
+2026-06-21 00:59:06,231 INFO: epoch=001 train_loss=0.7099 val_loss=0.3085
+2026-06-21 00:59:06,768 INFO: epoch=002 train_loss=0.3027 val_loss=0.2529
+2026-06-21 00:59:07,286 INFO: epoch=003 train_loss=0.2651 val_loss=0.2240
+2026-06-21 00:59:07,915 INFO: epoch=004 train_loss=0.2405 val_loss=0.2029
+2026-06-21 00:59:08,427 INFO: epoch=005 train_loss=0.2219 val_loss=0.1851
+2026-06-21 00:59:08,937 INFO: epoch=006 train_loss=0.2061 val_loss=0.1702
+2026-06-21 00:59:09,455 INFO: epoch=007 train_loss=0.1920 val_loss=0.1555
+2026-06-21 00:59:09,970 INFO: epoch=008 train_loss=0.1789 val_loss=0.1429
+2026-06-21 00:59:10,495 INFO: epoch=009 train_loss=0.1673 val_loss=0.1313
+2026-06-21 00:59:11,012 INFO: epoch=010 train_loss=0.1575 val_loss=0.1209
+2026-06-21 00:59:11,533 INFO: epoch=011 train_loss=0.1483 val_loss=0.1123
+2026-06-21 00:59:12,048 INFO: epoch=012 train_loss=0.1401 val_loss=0.1038
+2026-06-21 00:59:12,569 INFO: epoch=013 train_loss=0.1329 val_loss=0.0970
+2026-06-21 00:59:13,101 INFO: epoch=014 train_loss=0.1261 val_loss=0.0901
+2026-06-21 00:59:13,619 INFO: epoch=015 train_loss=0.1205 val_loss=0.0853
+2026-06-21 00:59:14,138 INFO: epoch=016 train_loss=0.1168 val_loss=0.0776
+2026-06-21 00:59:14,657 INFO: epoch=017 train_loss=0.1109 val_loss=0.0731
+2026-06-21 00:59:15,172 INFO: epoch=018 train_loss=0.1082 val_loss=0.0688
+2026-06-21 00:59:15,687 INFO: epoch=019 train_loss=0.1044 val_loss=0.0669
+2026-06-21 00:59:16,204 INFO: epoch=020 train_loss=0.1007 val_loss=0.0632
+2026-06-21 00:59:16,734 INFO: epoch=021 train_loss=0.0972 val_loss=0.0591
+2026-06-21 00:59:17,266 INFO: epoch=022 train_loss=0.0944 val_loss=0.0570
+2026-06-21 00:59:17,789 INFO: epoch=023 train_loss=0.0912 val_loss=0.0546
+2026-06-21 00:59:18,315 INFO: epoch=024 train_loss=0.0887 val_loss=0.0523
+2026-06-21 00:59:18,875 INFO: epoch=025 train_loss=0.0875 val_loss=0.0485
+2026-06-21 00:59:19,395 INFO: epoch=026 train_loss=0.0840 val_loss=0.0488
+2026-06-21 00:59:19,878 INFO: epoch=027 train_loss=0.0819 val_loss=0.0462
+2026-06-21 00:59:20,408 INFO: epoch=028 train_loss=0.0796 val_loss=0.0498
+2026-06-21 00:59:20,911 INFO: epoch=029 train_loss=0.0773 val_loss=0.0457
+2026-06-21 00:59:21,433 INFO: epoch=030 train_loss=0.0766 val_loss=0.0416
+2026-06-21 00:59:21,961 INFO: epoch=031 train_loss=0.0793 val_loss=0.0411
+2026-06-21 00:59:22,507 INFO: epoch=032 train_loss=0.0739 val_loss=0.0547
+2026-06-21 00:59:22,988 INFO: epoch=033 train_loss=0.0864 val_loss=0.0351
+2026-06-21 00:59:23,513 INFO: epoch=034 train_loss=0.0798 val_loss=0.0319
+2026-06-21 00:59:24,052 INFO: epoch=035 train_loss=0.0754 val_loss=0.0322
+2026-06-21 00:59:24,540 INFO: epoch=036 train_loss=0.0743 val_loss=0.0329
+2026-06-21 00:59:25,028 INFO: epoch=037 train_loss=0.0737 val_loss=0.0311
+2026-06-21 00:59:25,551 INFO: epoch=038 train_loss=0.0710 val_loss=0.0314
+2026-06-21 00:59:26,044 INFO: epoch=039 train_loss=0.0693 val_loss=0.0306
+2026-06-21 00:59:26,567 INFO: epoch=040 train_loss=0.0694 val_loss=0.0286
+2026-06-21 00:59:27,101 INFO: epoch=041 train_loss=0.0688 val_loss=0.0323
+2026-06-21 00:59:27,580 INFO: epoch=042 train_loss=0.0675 val_loss=0.0294
+2026-06-21 00:59:28,073 INFO: epoch=043 train_loss=0.0664 val_loss=0.0264
+2026-06-21 00:59:28,591 INFO: epoch=044 train_loss=0.0646 val_loss=0.0262
+2026-06-21 00:59:29,116 INFO: epoch=045 train_loss=0.0622 val_loss=0.0255
+2026-06-21 00:59:29,678 INFO: epoch=046 train_loss=0.0602 val_loss=0.0272
+2026-06-21 00:59:30,177 INFO: epoch=047 train_loss=0.0589 val_loss=0.0319
+2026-06-21 00:59:30,665 INFO: epoch=048 train_loss=0.0696 val_loss=0.0312
+2026-06-21 00:59:31,159 INFO: epoch=049 train_loss=0.0628 val_loss=0.0299
+2026-06-21 00:59:31,647 INFO: epoch=050 train_loss=0.0603 val_loss=0.0287
+2026-06-21 00:59:31,810 INFO: Predicting test-set masks
+2026-06-21 00:59:40,901 INFO: Stitching test mosaic with manual positions
+2026-06-21 00:59:42,789 INFO: Evaluating segmentation and stitching
+INFO: QC report written to /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/segment_stitch/outputs/Somites21/QC_REPORT.md

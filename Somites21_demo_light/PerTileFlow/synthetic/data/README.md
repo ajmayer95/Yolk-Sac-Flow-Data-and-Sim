@@ -13,14 +13,14 @@ The anatomical topology and vessel geometry come from
 from `Somites21_demo_light/PerTileFlow`, the same simulation path used by
 `scripts/default_mosaic_tile_profiles.py`.
 
-For each vessel \(e\), the areal distensibility is
+For each vessel `e`, the areal distensibility is
 
-\[
-D_e = D_0 \left(\frac{R_e}{R_0}\right)^\alpha.
-\]
+```text
+D_e = D_0 (R_e / R_0)^α
+```
 
 The 6,441 solver-valid vessels have a median radius of **25.8541 µm**. The
-experiments use the nearby round, fixed reference **\(R_0=25\) µm** so the
+experiments use the nearby round, fixed reference **R₀ = 25 µm** so the
 normalization is stable and easy to report.
 
 The whole mosaic is solved jointly for DC, H1, and H2. Boundary forcing follows
@@ -34,16 +34,21 @@ equally within each group. The graph median cardiac frequency is used
 The truth solve is reused across noise levels. For H1 and H2, observations use
 relative circular complex Gaussian noise:
 
-\[
-v^{obs}_{e,h}=v^{true}_{e,h}+\epsilon,\qquad
-\sqrt{\mathbb{E}|\epsilon|^2}=\eta |v^{true}_{e,h}|,
-\]
+```text
+v_obs(e,h) = v_true(e,h) + ε
 
-where \(\eta\) is the configured noise level. Independent real and imaginary
+sqrt(E[|ε|²]) = η |v_true(e,h)|
+```
+
+where `η` is the configured noise level. Independent real and imaginary
 components each have standard deviation
-\(\eta |v^{true}_{e,h}|/\sqrt{2}\). DC remains noise-free in the base
-configuration. A fixed seed gives paired noise realizations across parameter
-conditions and noise levels.
+
+```text
+η |v_true(e,h)| / √2
+```
+
+DC remains noise-free in the base configuration. A fixed seed gives paired
+noise realizations across parameter conditions and noise levels.
 
 ## Files and names
 
@@ -64,14 +69,14 @@ pl_d1e-03_a1_n10_s42.npz
 Each `.npz` is self-describing through `schema_version` and `metadata_json` and
 contains:
 
-- graph topology: node IDs, edge endpoint IDs and indices;
-- geometry: radius, length, area, node coordinates, and tile membership;
-- ground truth: per-edge distensibility, node pressure harmonics, edge flow
+* graph topology: node IDs, edge endpoint IDs and indices;
+* geometry: radius, length, area, node coordinates, and tile membership;
+* ground truth: per-edge distensibility, node pressure harmonics, edge flow
   harmonics, and edge velocity harmonics;
-- observations: noisy edge velocity harmonics, their known noise scale, and a
+* observations: noisy edge velocity harmonics, their known noise scale, and a
   validity mask;
-- boundary forcing: boundary node IDs, source/sink labels, and DC/H1/H2 flows;
-- fixed edge split codes: `0=train`, `1=validation`, `2=test`.
+* boundary forcing: boundary node IDs, source/sink labels, and DC/H1/H2 flows;
+* fixed edge split codes: `0=train`, `1=validation`, `2=test`.
 
 Arrays use SI units. Harmonic arrays have shape `(item, 3)` with columns
 `[DC, H1, H2]`; harmonic values are stored as complex numbers, including DC
@@ -88,13 +93,13 @@ NetworkX graph versus a synthetic file. A future real-data preprocessing step
 can write the same topology, geometry, tile membership, boundary, split,
 harmonic, and observation arrays:
 
-- populate `velocity_observed_m_s` from PIV DC/H1/H2 estimates;
-- populate `observation_valid` from measurement availability and quality
+* populate `velocity_observed_m_s` from PIV DC/H1/H2 estimates;
+* populate `observation_valid` from measurement availability and quality
   filtering;
-- populate `velocity_noise_sigma_m_s` from PIV uncertainty or SNR;
-- use `data_kind: real` in `metadata_json`;
-- omit unavailable truth arrays or fill them with `NaN`;
-- preserve the same edge orientation and SI units.
+* populate `velocity_noise_sigma_m_s` from PIV uncertainty or SNR;
+* use `data_kind: real` in `metadata_json`;
+* omit unavailable truth arrays or fill them with `NaN`;
+* preserve the same edge orientation and SI units.
 
 With that adapter, deterministic solvers, Bayesian solvers, GNNs, and metrics
 can load synthetic and real mosaics through one interface. Only truth-dependent

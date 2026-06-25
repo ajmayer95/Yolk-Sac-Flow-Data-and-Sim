@@ -1,0 +1,24 @@
+# Parameter grid for the full synthetic distensibility benchmark.
+# Each generated dataset should inherit unspecified settings from
+# configs/synthetic_base.yaml.
+
+base_config: configs/synthetic_base.yaml
+
+# Ground-truth wall-law parameters.
+D0_values: [1.0e-4, 1.0e-3, 1.0e-2]
+alpha_values: [0.0, 1.0, 2.0]
+distensibility_models: [constant, power_law]
+
+# Fractional standard deviations for the configured observation-noise model.
+noise_levels: [0.0, 0.10, 0.25, 0.50]
+
+# DC, H1, and H2 are one jointly generated condition, not separate grid axes.
+harmonics_generated: [0, 1, 2]
+
+# One default replicate; add seeds here to run repeated noise realizations.
+seeds: [42]
+
+# For the constant model, alpha has no physical effect. Grid expansion should
+# therefore generate one constant-model dataset per D0/noise/seed combination
+# rather than duplicate it across alpha_values.
+deduplicate_constant_model_alpha: true

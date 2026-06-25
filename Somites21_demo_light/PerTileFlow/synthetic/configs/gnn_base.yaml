@@ -1,0 +1,77 @@
+# Base configuration for physics-informed GNNs and neural baselines.
+# All paths are relative to the synthetic/ project root.
+
+model:
+  # Accepted names: physics_informed_gnn, vanilla_gcn, edge_local_mlp.
+  name: physics_informed_gnn
+  # Optional subtype for baseline models; unused by the primary model.
+  baseline_type: null
+  hidden_dim: 64
+  num_layers: 2
+  dropout: 0.0
+  activation: relu
+  use_edge_features: true
+  use_node_features: true
+  # false is the primary DC-only model; true enables harmonic-informed
+  # correction ablations.
+  predict_harmonic_corrections: false
+
+# Input features expected in processed graph objects.
+features:
+  node_features:
+    - x_norm
+    - y_norm
+    - degree
+    - source_sink_velocity
+    - is_source
+    - is_sink
+  edge_features:
+    - log_radius
+    - log_length
+    - log_velocity_conductance
+  optional_harmonic_node_features: false
+  optional_snr_edge_features: false
+
+# Full-graph training is assumed when batch_size is null.
+training:
+  epochs: 200
+  batch_size: null
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  optimizer: adamw
+  early_stopping: true
+  patience: 25
+  seed: 42
+
+# Physics-informed objective weights. Harmonic terms are disabled for the
+# primary DC-only configuration and can be enabled for ablations.
+loss:
+  velocity_weight: 1.0
+  lambda_delta: 1.0e-4
+  lambda_pressure: 1.0e-4
+  lambda_harmonic: 0.0
+  lambda_delta_harmonic: 0.0
+  lambda_pressure_harmonic: 0.0
+  use_snr_weights: false
+
+data:
+  # Accepted values: dc_only, dc_h1, dc_h1_h2.
+  harmonics_used: dc_only
+  train_edges: train
+  val_edges: val
+  test_edges: test
+
+# Apply the common inverse solver to learned corrections or latent fields so
+# neural and classical methods report the same distensibility metrics.
+downstream_inference:
+  enabled: true
+  solver_config: configs/solver_base.yaml
+  pressure_prior_enabled: true
+  pressure_prior_scale: 1.0
+
+# Run artifacts retained for evaluation and reproducibility.
+output:
+  save_checkpoint: true
+  save_predictions: true
+  save_corrections: true
+  save_pressure_field: true

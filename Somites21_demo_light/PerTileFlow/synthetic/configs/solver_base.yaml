@@ -1,0 +1,63 @@
+# Base configuration for deterministic and Bayesian inverse solvers.
+# All paths are relative to the synthetic/ project root.
+
+solver:
+  # Accepted methods: linear_tile, linear_mosaic, bayesian_tile,
+  # bayesian_mosaic.
+  method: bayesian_mosaic
+  # Accepted spatial modes: tile, whole_mosaic.
+  spatial_mode: whole_mosaic
+  # Accepted alpha modes: prescribed, solved.
+  alpha_mode: solved
+  # Used only when alpha_mode is prescribed.
+  prescribed_alpha: null
+  # Accepted harmonic sets: [1] or [1, 2].
+  harmonics_used: [1, 2]
+  use_dc: false
+  # fit_edges accepts train, train_val, or all.
+  fit_edges: train
+  # Held-out partition used for reported reconstruction metrics.
+  evaluate_edges: test
+
+# Search grid used for profile objectives or gridded posterior evaluation.
+parameter_grid:
+  log10_D0_min: -5.0
+  log10_D0_max: -1.0
+  num_D0: 81
+  alpha_min: -1.0
+  alpha_max: 3.0
+  num_alpha: 81
+
+# Numerical controls for deterministic linear solves.
+linear_solver:
+  regularization: 1.0e-8
+  use_pseudoinverse: true
+
+# Priors and uncertainty settings for Bayesian inference.
+bayesian_solver:
+  # Prior on log10(D0), consistent with the parameter_grid coordinates.
+  log_D0_prior_mean: -3.0
+  log_D0_prior_sd: 1.0
+  alpha_prior_mean: 1.0
+  alpha_prior_sd: 1.0
+  boundary_prior_scale: 1.0
+  measurement_noise_mode: known_from_synthetic
+  credible_interval_level: 0.95
+
+# Optional pressure conditioning is activated by scripts/run_solver.py
+# --pressure-field. Current GNN artifacts contain DC only, so the default
+# "scaled" mode regularizes each fitted complex harmonic pressure toward the
+# DC spatial shape while leaving its amplitude and phase free. If a future
+# artifact contains H1 or H2, that harmonic is treated as known exactly unless
+# --do-not-fix-stored-harmonics is passed.
+pressure_conditioning:
+  mode: scaled  # Accepted: off, absolute, scaled.
+  weight: 1.0
+  sigma_pa: 0.0  # <=0 selects an automatic RMS scale with a 1 Pa floor.
+  fix_available_harmonics: true
+
+# Run-level diagnostics and predictions to retain.
+output:
+  save_profile_surface: true
+  save_posterior_surface: true
+  save_predictions: true

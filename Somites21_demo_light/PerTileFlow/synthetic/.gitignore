@@ -1,0 +1,27 @@
+# Python caches
+**/__pycache__/
+*.py[cod]
+
+# Scheduler logs
+scripts/logs/
+
+# Generated bulk outputs
+outputs/runs/
+outputs/tables/
+outputs/metrics/**
+outputs/figures/**
+
+# Keep the curated top-level summary artifacts in Git
+!outputs/
+!outputs/README.md
+!outputs/figures/
+!outputs/figures/solver_comparison/
+!outputs/figures/solver_comparison/manifest.json
+!outputs/figures/solver_comparison/configuration_summary.csv
+!outputs/figures/solver_comparison/all_solver_results.csv
+
+# Allow curated directories to exist even when empty
+!outputs/metrics/
+!outputs/metrics/.gitkeep
+!outputs/tables/
+!outputs/tables/.gitkeep

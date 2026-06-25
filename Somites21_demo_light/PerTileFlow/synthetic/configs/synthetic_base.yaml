@@ -1,0 +1,55 @@
+# Base configuration for generating one synthetic vascular dataset.
+# All paths are relative to the synthetic/ project root.
+
+graph:
+  # Stage the source graph from:
+  # /mnt/home/sswee/ceph/Somites21_demo/emb1/analyzed/mosaic_graph_analyzed.gpickle
+  # at this project-relative location before running data generation.
+  path: data/processed/mosaic_graph.gpickle
+  graph_format: gpickle
+
+# Ground-truth physics and forcing used to generate velocity observations.
+simulation:
+  # Wall law: D_e = D0 * (R_e / R0)^alpha.
+  distensibility_model: power_law
+  D0: 1.0e-3
+  alpha: 1.0
+  # The solver-valid graph-wide median radius is 25.8541 um. Use a nearby
+  # round value so every run has the same, easy-to-report normalization.
+  R0_mode: fixed_value
+  R0_value: 2.5e-5
+  # Generate DC, first-harmonic, and second-harmonic fields together.
+  harmonics_generated: [0, 1, 2]
+  # null means infer the frequency from graph metadata or boundary forcing.
+  heart_frequency_hz: null
+  fluid_density: 1060.0
+  fluid_viscosity: 0.0035
+  # Reuse the default mosaic simulation's measured harmonic waveform shapes,
+  # averaged and equally split within source/sink boundary groups.
+  boundary_condition_mode: measured_equal_split_flux
+  seed: 42
+
+# Measurement noise applied after computing noise-free velocity fields.
+noise:
+  model: relative_complex_gaussian
+  # Fractional noise standard deviation relative to each observation magnitude.
+  level: 0.10
+  apply_to_harmonics: [1, 2]
+  apply_to_dc: false
+  heteroscedastic: false
+
+# Fixed edge partitions shared by solvers and learned models.
+splits:
+  train_fraction: 0.70
+  val_fraction: 0.15
+  test_fraction: 0.15
+  split_by: edge
+  seed: 42
+
+# Dataset artifacts retained for reproducibility and downstream evaluation.
+output:
+  dir: data/synthetic
+  save_true_pressure: true
+  save_true_velocity: true
+  save_noisy_observations: true
+  save_boundary_conditions: true

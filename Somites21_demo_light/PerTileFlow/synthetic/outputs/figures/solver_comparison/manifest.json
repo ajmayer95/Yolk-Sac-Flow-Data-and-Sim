@@ -1,0 +1,16 @@
+{
+  "n_runs": 2152,
+  "n_datasets": 36,
+  "methods": [
+    "bayesian_mosaic",
+    "bayesian_tile",
+    "linear_mosaic",
+    "linear_tile"
+  ],
+  "pressure_priors": [
+    "k0",
+    "none",
+    "physics_gnn"
+  ],
+  "missing_dataset_warning": false
+}

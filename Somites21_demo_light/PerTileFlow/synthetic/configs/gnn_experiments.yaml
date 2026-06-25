@@ -1,0 +1,73 @@
+# GNN experiment grid. Paths are relative to the synthetic/ project root.
+
+datasets:
+  manifest: data/synthetic/manifest.csv
+
+grid:
+  model_names: [physics_informed_gnn, vanilla_gcn, edge_local_mlp]
+  K_values: [0, 1, 2, 3, 4]
+  harmonic_modes: [dc_only, dc_h1, dc_h1_h2]
+  seeds: [42]
+
+# Model-specific defaults. K=0 is always routed to edge_local_mlp.
+model_defaults:
+  physics_informed_gnn:
+    use_physics_layer: true
+    use_velocity_loss: true
+    use_correction_loss: true
+    use_pressure_loss: true
+    use_harmonic_loss: true
+  vanilla_gcn:
+    use_physics_layer: false
+    use_velocity_loss: true
+    use_correction_loss: false
+    use_pressure_loss: false
+    use_harmonic_loss: true
+  edge_local_mlp:
+    use_physics_layer: true
+    use_velocity_loss: true
+    use_correction_loss: true
+    use_pressure_loss: true
+    use_harmonic_loss: true
+
+model:
+  hidden_dim: 64
+  dropout: 0.0
+  activation: relu
+  correction_bound: 8.0
+  harmonic_correction_bound: 8.0
+  # The vanilla GCN decodes a gauge-fixed nodal DC pressure field. DC velocity
+  # is reconstructed from pressure drops and fixed Poiseuille conductance.
+  vanilla_gcn_pressure_decoder: true
+
+training:
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  epochs: 200
+  patience: 25
+  optimizer: adamw
+  gradient_clip: 5.0
+  device: auto
+  pressure_solver_iterations: 120
+  pressure_solver_tolerance: 1.0e-8
+  seed: 42
+
+loss:
+  lambda_delta: 1.0e-4
+  lambda_pressure: 1.0e-4
+  lambda_harmonic: 1.0
+  lambda_delta_harmonic: 1.0e-4
+  lambda_pressure_harmonic: 0.0
+
+data:
+  train_split_code: 0
+  val_split_code: 1
+  test_split_code: 2
+
+output:
+  root: outputs/runs/gnn
+  save_checkpoint: true
+  save_predicted_velocities: true
+  save_learned_corrections: true
+  save_pressure_field: true
+  save_train_val_test_metrics: true

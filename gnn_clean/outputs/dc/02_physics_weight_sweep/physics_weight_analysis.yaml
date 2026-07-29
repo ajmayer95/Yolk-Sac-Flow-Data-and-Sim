@@ -1,0 +1,8 @@
+{
+  "n_all_runs": 80,
+  "n_gnn_runs": 64,
+  "n_poiseuille_runs": 16,
+  "n_representatives": 16,
+  "representative_csv": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/outputs/physics_weight_sweep_step2p5/representative_configurations.csv",
+  "representative_plot_labels_csv": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/outputs/physics_weight_sweep_step2p5/figures/representative_plot_labels.csv"
+}

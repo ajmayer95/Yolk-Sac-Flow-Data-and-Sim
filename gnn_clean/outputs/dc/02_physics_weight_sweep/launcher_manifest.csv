@@ -1,0 +1,2 @@
+run_name,model_family,lambda_q,lambda_k,lambda_b,lambda_delta,message_passing_layers,graph_path,device,seed,epochs,viscosity_pa_s,status,run_dir
+poiseuille__q_0p1__k_0p1,poiseuille_baseline,0.1,0.1,100.0,nan,0,/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/datasets/harmonized_scaled_dataset.gpickle,cpu,0,100,0.0035,completed,/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/outputs/physics_weight_sweep_step2p5/poiseuille/poiseuille__q_0p1__k_0p1

@@ -14,3 +14,6 @@ Somites27_demo/
 Somites15_demo.zip
 Somites21_demo.zip
 Somites27_demo.zip
+
+# Large generated datasets
+gnn_clean/datasets/*.gpickle

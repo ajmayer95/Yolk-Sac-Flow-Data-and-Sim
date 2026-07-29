@@ -1,0 +1,28 @@
+{
+  "graph_path": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/datasets/harmonized_scaled_dataset.gpickle",
+  "output_root": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/outputs/radius_refinement_step2p5",
+  "selected_step2_model": {
+    "run_name": "q_0p1__k_0p1__delta_0p1",
+    "plot_label": "B1",
+    "selection_category": "balanced",
+    "selection_rank_within_regime": 1,
+    "lambda_q": 0.1,
+    "lambda_k": 0.1,
+    "lambda_delta": 0.1,
+    "run_dir": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/outputs/physics_weight_sweep_step2p5/gnn/q_0p1__k_0p1__delta_0p1",
+    "checkpoint_path": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/Somites21_demo/PerTileFlow/gnn/outputs/physics_weight_sweep_step2p5/gnn/q_0p1__k_0p1__delta_0p1/model_checkpoint.pt"
+  },
+  "resolved_lambda_q": 0.1,
+  "resolved_lambda_k": 0.1,
+  "resolved_lambda_delta": 0.1,
+  "lambda_b": 100.0,
+  "message_passing_depth": 2,
+  "targeted_edge_count": 166,
+  "low_snr_edge_count": 919,
+  "low_snr_fraction": 0.2,
+  "low_snr_cutoff": 5.483065587023277,
+  "targeted_unmatched_entries": [],
+  "overlap_count": 39,
+  "overlap_fraction_of_targeted": 0.23493975903614459,
+  "overlap_fraction_of_low_snr": 0.042437431991294884
+}

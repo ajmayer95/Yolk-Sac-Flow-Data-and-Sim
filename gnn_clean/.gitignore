@@ -1,3 +1,4 @@
 outputs/
 outputs_old/
 datasets/
+publish/**/release_bundle/**/*.tar.gz

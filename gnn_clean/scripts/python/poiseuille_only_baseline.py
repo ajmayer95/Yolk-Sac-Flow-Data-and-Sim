@@ -23,19 +23,17 @@ from physics_layer import (
     build_weighted_laplacian,
     constrained_dc_solve_equal_A_equal_V_torch,
 )
-from real_data import MU, build_real_gnn_data
+from real_data import MU, build_real_gnn_data, load_graph
 from utils import load_yaml, write_yaml
 
 
-# DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "harmonized_scaled_dataset.gpickle"
-DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "emb1_mosaic_graph_analyzed.gpickle"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "poiseuille_only_baseline"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "dc" / "00_ideal_models" / "poiseuille_only_baseline"
 NL_PER_M3 = 1.0e12
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("graph", nargs="?", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("graph", type=Path)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--viscosity-pa-s", type=float, default=float(MU))
@@ -70,6 +68,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-kirchhoff", type=float, default=1.0)
     parser.add_argument("--lambda-pressure-constraints", type=float, default=1.0)
     parser.add_argument("--lambda-flow-residual", type=float, default=1.0)
+    parser.add_argument(
+        "--flip-observed-flow-sign",
+        action="store_true",
+        help="Flip the sign of observed DC edge flows before fitting. Intended for sign-convention diagnostics.",
+    )
     parser.add_argument(
         "--sign-eps-relative",
         type=float,
@@ -447,11 +450,15 @@ def _observed_flow_block(
     edge_index: torch.Tensor,
     device: torch.device,
     dtype: torch.dtype,
+    *,
+    flip_observed_flow_sign: bool = False,
 ) -> dict[str, object]:
     q_obs = (
         data.velocity_observed_m_s[:, 0, 0].to(device=device, dtype=dtype)
         * data.area_m2.to(device=device, dtype=dtype)
     )
+    if flip_observed_flow_sign:
+        q_obs = -q_obs
     valid_mask = (
         (data.train_mask | data.val_mask | data.test_mask).to(device=device)
         & torch.isfinite(q_obs)
@@ -749,6 +756,7 @@ def _solve_reduced_constrained_pressure(
     lambda_kirchhoff: float,
     lambda_pressure_constraints: float,
     lambda_flow_residual: float,
+    flip_observed_flow_sign: bool = False,
 ) -> dict[str, object]:
     system = _partitioned_system(
         data=data,
@@ -790,6 +798,7 @@ def _solve_reduced_constrained_pressure(
         edge_index=edge_index,
         device=device,
         dtype=dtype,
+        flip_observed_flow_sign=flip_observed_flow_sign,
     )
     reduced_flow_matrix = flow_payload["matrix"]
     reduced_flow_rhs = flow_payload["rhs"]
@@ -1042,6 +1051,7 @@ def _solve_baseline(
     lambda_kirchhoff: float,
     lambda_pressure_constraints: float,
     lambda_flow_residual: float,
+    flip_observed_flow_sign: bool = False,
 ) -> dict[str, object]:
     # Honor an explicitly requested reduced/partitioned solve mode for sweep
     # scripts, even if the default config still names the legacy hard solver.
@@ -1074,6 +1084,7 @@ def _solve_baseline(
             lambda_kirchhoff=lambda_kirchhoff,
             lambda_pressure_constraints=lambda_pressure_constraints,
             lambda_flow_residual=lambda_flow_residual,
+            flip_observed_flow_sign=flip_observed_flow_sign,
         )
     if solver_kind == "constrained_dc_equal_A_equal_V":
         solve_result = constrained_dc_solve_equal_A_equal_V_torch(
@@ -1095,7 +1106,13 @@ def _solve_baseline(
             "source_vector_m3_s": data.boundary_injection_m3_s.to(dtype=torch.float32),
             "dc_solve_mode": "hard_equal_a_equal_v_flow_balance",
             "solver_kind_used": "constrained_dc_equal_A_equal_V",
-            "constraint_labels": ["hard_flow_inlet_match", "hard_total_inlet_equals_total_outlet", "equal-a-equal-v"],
+            "constraint_labels": [
+                "hard_total_inlet_equals_total_outlet",
+                "hard_equal_arterial_pressure",
+                "hard_equal_venous_pressure",
+                "soft_arterial_inlet_distribution_match",
+                "soft_free_node_kirchhoff_fit",
+            ],
             "gauge_node_index": gauge_node,
             "gauge_node_id": _node_label(data, gauge_node),
             "pressure_prescribed_node_ids": _node_label(data, gauge_node),
@@ -1118,6 +1135,7 @@ def main() -> None:
     pressure_constraints = _selected_pressure_constraints(args)
 
     graph_path = args.graph.expanduser().resolve()
+    graph = load_graph(graph_path)
     data = build_real_gnn_data(graph_path, config)
 
     viscosity = float(args.viscosity_pa_s)
@@ -1146,6 +1164,7 @@ def main() -> None:
         lambda_kirchhoff=float(args.lambda_kirchhoff),
         lambda_pressure_constraints=float(args.lambda_pressure_constraints),
         lambda_flow_residual=float(args.lambda_flow_residual),
+        flip_observed_flow_sign=bool(args.flip_observed_flow_sign),
     )
 
     pressure = solve_result["pressure_pa"].detach().cpu().numpy().astype(np.float64)
@@ -1174,7 +1193,22 @@ def main() -> None:
     # This is the authoritative predicted flow used for metrics.
     q_pred = q_pred_solver
 
+    physical_flow_sign = np.ones_like(q_pred, dtype=np.float64)
+    use_physical_flow_plot = bool(graph.graph.get("canonical_conversion_ready", False))
+    if use_physical_flow_plot:
+        for edge_idx, (u, v) in enumerate(data.edge_ids):
+            edge_data = graph.edges[u, v]
+            flow_from = edge_data.get("flow_from")
+            flow_to = edge_data.get("flow_to")
+            if flow_from == v and flow_to == u:
+                physical_flow_sign[edge_idx] = -1.0
+            else:
+                physical_flow_sign[edge_idx] = 1.0
+    q_pred_physical = q_pred * physical_flow_sign
+
     q_obs = _observed_flow_m3_s(data).astype(np.float64)
+    if args.flip_observed_flow_sign:
+        q_obs = -q_obs
     residual = q_pred - q_obs
     valid_mask = _valid_observed_mask(data, q_obs)
     # Keep SI units inside the solve and convert only for reported diagnostics.
@@ -1420,6 +1454,9 @@ def main() -> None:
                 ),
                 "observed_flow_nl_s": float(q_obs_nl_s[edge_idx]),
                 "predicted_flow_nl_s": float(q_pred_nl_s[edge_idx]),
+                "predicted_flow_physical_nl_s": float(q_pred_physical[edge_idx] * NL_PER_M3)
+                if use_physical_flow_plot
+                else float("nan"),
                 "flow_residual_nl_s": float(residual_nl_s[edge_idx]),
                 "absolute_flow_residual_nl_s": float(abs(residual_nl_s[edge_idx])),
                 "q_obs_over_scale": float(q_obs[edge_idx] / q_scale)
@@ -1506,6 +1543,7 @@ def main() -> None:
         "lambda_kirchhoff": float(args.lambda_kirchhoff),
         "lambda_pressure_constraints": float(args.lambda_pressure_constraints),
         "lambda_flow_residual": float(args.lambda_flow_residual),
+        "flip_observed_flow_sign": bool(args.flip_observed_flow_sign),
         "n_nodes": int(len(data.node_id)),
         "n_edges": int(data.n_edges),
         "n_observed_edges": int(np.sum(valid_mask)),

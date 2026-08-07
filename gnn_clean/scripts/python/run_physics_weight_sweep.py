@@ -25,7 +25,6 @@ from physics_weight_sweep_lib import (
 from utils import load_yaml, write_yaml
 
 
-DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "harmonized_scaled_dataset.gpickle"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "dc" / "02_physics_weight_sweep"
 GNN_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "gnn_flow.py"
 POISEUILLE_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "poiseuille_only_baseline.py"
@@ -33,7 +32,7 @@ POISEUILLE_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "poiseuille_only_basel
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--graph", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--seed", type=int, default=0)
@@ -170,6 +169,8 @@ def poiseuille_command(
         "cpu",
         "--viscosity-pa-s",
         str(float(args.viscosity_pa_s)),
+        "--dc-solve-mode",
+        "reduced-soft-constrained-lstsq",
         "--arterial-flow-mode",
         "dataset",
         "--pressure-constraint",

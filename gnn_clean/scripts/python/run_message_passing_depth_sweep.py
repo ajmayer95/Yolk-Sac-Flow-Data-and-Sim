@@ -34,7 +34,6 @@ from analyze_physics_weight_sweep import compute_from_gnn_run, safe_float
 from utils import load_yaml, write_yaml
 
 
-DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "harmonized_scaled_dataset.gpickle"
 DEFAULT_STEP2_ROOT = PROJECT_ROOT / "outputs" / "dc" / "02_physics_weight_sweep"
 DEFAULT_REPRESENTATIVE_CSV = DEFAULT_STEP2_ROOT / "representative_configurations.csv"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "dc" / "04_message_passing_sensitivity"
@@ -46,8 +45,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--representative-csv", type=Path, default=DEFAULT_REPRESENTATIVE_CSV)
     parser.add_argument("--step2-root", type=Path, default=DEFAULT_STEP2_ROOT)
-    parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--graph", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--representative-labels", nargs="*", default=None)
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
@@ -76,6 +76,26 @@ def select_best_balanced(rep_csv: Path) -> pd.Series:
     else:
         balanced = balanced.sort_values(["run_name"])
     return balanced.iloc[0]
+
+
+def select_representatives(rep_csv: Path, labels: list[str] | None) -> list[pd.Series]:
+    df = pd.read_csv(rep_csv)
+    if labels:
+        selected: list[pd.Series] = []
+        missing: list[str] = []
+        for label in labels:
+            subset = df[df["plot_label"] == label].copy()
+            if subset.empty:
+                missing.append(label)
+                continue
+            selected.append(subset.iloc[0])
+        if missing:
+            raise ValueError(
+                "Representative labels not found in representative_configurations.csv: "
+                + ", ".join(sorted(missing))
+            )
+        return selected
+    return [select_best_balanced(rep_csv)]
 
 
 def selected_step2_config_path(step2_root: Path, run_name: str) -> Path:
@@ -673,53 +693,70 @@ def aggregate_and_plot(output_root: Path, selected_row: pd.Series, graph_path: P
     return summary_df, summary_yaml
 
 
+def output_root_for_representative(base_output_root: Path, selected_row: pd.Series, multi: bool) -> Path:
+    if not multi:
+        return base_output_root
+    label = str(selected_row.get("plot_label", "")).strip() or str(selected_row["run_name"])
+    return base_output_root / label
+
+
 def main() -> None:
     args = parse_args()
-    output_root = args.output_root.expanduser().resolve()
-    output_root.mkdir(parents=True, exist_ok=True)
-
-    selected_row = select_best_balanced(args.representative_csv.expanduser().resolve())
-    step2_config_path = selected_step2_config_path(
-        args.step2_root.expanduser().resolve(),
-        str(selected_row["run_name"]),
+    base_output_root = args.output_root.expanduser().resolve()
+    base_output_root.mkdir(parents=True, exist_ok=True)
+    selected_rows = select_representatives(
+        args.representative_csv.expanduser().resolve(),
+        list(args.representative_labels) if args.representative_labels else None,
     )
-    if not step2_config_path.exists():
-        raise FileNotFoundError(f"Missing Step 2 config for selected balanced run: {step2_config_path}")
+    multi = len(selected_rows) > 1
 
-    if args.aggregate_only:
-        aggregate_and_plot(output_root, selected_row, args.graph)
-        return
+    for selected_row in selected_rows:
+        output_root = output_root_for_representative(base_output_root, selected_row, multi)
+        output_root.mkdir(parents=True, exist_ok=True)
 
-    step2_config = load_yaml(step2_config_path)
-    generated_config_root = output_root / "_generated_configs"
-    generated_config_root.mkdir(parents=True, exist_ok=True)
-
-    for K_value in K_VALUES:
-        run_name = build_run_name(str(selected_row["run_name"]), K_value)
-        run_dir = output_root / run_name
-        run_dir.mkdir(parents=True, exist_ok=True)
-        config_path = generated_config_root / f"{run_name}.yaml"
-        write_yaml(config_path, build_override(step2_config, K_value, args.seed, args.epochs))
-        if run_is_complete(run_dir) and not args.overwrite:
-            print(f"Skipping completed run: {run_name}")
-            continue
-        cmd = gnn_command(
-            args.python_bin,
-            args.graph.expanduser().resolve(),
-            output_root,
-            run_name,
-            config_path,
-            args.device,
-            args.epochs,
-            args.seed,
+        step2_config_path = selected_step2_config_path(
+            args.step2_root.expanduser().resolve(),
+            str(selected_row["run_name"]),
         )
-        print("Command:", " ".join(str(part) for part in cmd))
-        if not args.dry_run:
-            subprocess.run(cmd, check=True)
-            cleanup_nonessential_outputs(run_dir)
+        if not step2_config_path.exists():
+            raise FileNotFoundError(
+                f"Missing Step 2 config for selected run {selected_row['run_name']}: {step2_config_path}"
+            )
 
-    if not args.dry_run:
-        aggregate_and_plot(output_root, selected_row, args.graph)
+        if args.aggregate_only:
+            aggregate_and_plot(output_root, selected_row, args.graph)
+            continue
+
+        step2_config = load_yaml(step2_config_path)
+        generated_config_root = output_root / "_generated_configs"
+        generated_config_root.mkdir(parents=True, exist_ok=True)
+
+        for K_value in K_VALUES:
+            run_name = build_run_name(str(selected_row["run_name"]), K_value)
+            run_dir = output_root / run_name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            config_path = generated_config_root / f"{run_name}.yaml"
+            write_yaml(config_path, build_override(step2_config, K_value, args.seed, args.epochs))
+            if run_is_complete(run_dir) and not args.overwrite:
+                print(f"Skipping completed run: {run_name}")
+                continue
+            cmd = gnn_command(
+                args.python_bin,
+                args.graph.expanduser().resolve(),
+                output_root,
+                run_name,
+                config_path,
+                args.device,
+                args.epochs,
+                args.seed,
+            )
+            print("Command:", " ".join(str(part) for part in cmd))
+            if not args.dry_run:
+                subprocess.run(cmd, check=True)
+                cleanup_nonessential_outputs(run_dir)
+
+        if not args.dry_run:
+            aggregate_and_plot(output_root, selected_row, args.graph)
 
 
 if __name__ == "__main__":

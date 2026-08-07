@@ -1,0 +1,5 @@
+plot_label,run_name,selection_category,selection_rank_within_regime,lambda_q,lambda_k,lambda_delta,marker,regime_color_name
+B1,q_1__k_1__delta_1,balanced,1.0,1.0,1.0,1.0,o,Balanced
+K1,q_10__k_100__delta_10,conservation_prioritized,1.0,10.0,100.0,10.0,o,Conservation-prioritized
+C1,q_0p1__k_0p1__delta_10,correction_regularized,1.0,0.1,0.1,10.0,o,Correction-regularized
+F1,q_100__k_0p1__delta_10,flow_prioritized,1.0,100.0,0.1,10.0,o,Flow-prioritized

@@ -36,7 +36,6 @@ from gnn_flow import (
 from poiseuille_only_baseline import NL_PER_M3
 from radius_correction_experiment_lib import (
     CONDITION_DISPLAY,
-    DEFAULT_GRAPH,
     DEFAULT_OUTPUT_ROOT,
     DEFAULT_REPRESENTATIVE_CSV,
     DEFAULT_REPRESENTATIVE_LABELS_CSV,
@@ -66,7 +65,7 @@ GNN_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "gnn_flow.py"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--graph", type=Path, required=True)
     parser.add_argument("--step2-root", type=Path, default=DEFAULT_STEP2_ROOT)
     parser.add_argument("--representative-csv", type=Path, default=DEFAULT_REPRESENTATIVE_CSV)
     parser.add_argument(

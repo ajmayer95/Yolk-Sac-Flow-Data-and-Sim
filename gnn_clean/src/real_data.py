@@ -254,22 +254,61 @@ def _boundary_injections(graph, node_ids: list[object], node_index: dict[object,
                 continue
             neighbor = neighbors[0]
             modeled_node = neighbor
-        edge_data = graph.edges[boundary_node, neighbor]
-        q_m3_s, valid = _dc_flow_m3_s(edge_data, boundary_node, neighbor)
-        if not valid:
-            continue
-        flow_from = edge_data.get("flow_from")
-        flow_to = edge_data.get("flow_to")
-        if flow_from == boundary_node:
-            sign = 1.0
-        elif flow_to == boundary_node:
-            sign = -1.0
-        else:
-            sign = 1.0 if node_data.get("boundary_type") == "source" else -1.0
+        q_m3_s = None
+        bc_harmonics = node_data.get("bc_harmonics")
+        if bc_harmonics is not None:
+            try:
+                bc_array = np.asarray(bc_harmonics).reshape(-1)
+                if bc_array.size:
+                    q0 = complex(bc_array[0])
+                    if math.isfinite(float(q0.real)) and math.isfinite(float(q0.imag)):
+                        if abs(float(q0.imag)) > 1.0e-10:
+                            raise ValueError(
+                                f"Boundary node {boundary_node!r} has non-negligible imaginary DC term: {q0!r}"
+                            )
+                        q_m3_s = float(q0.real) / nL_per_m3
+            except Exception:
+                q_m3_s = None
+        if q_m3_s is None:
+            edge_data = graph.edges[boundary_node, neighbor]
+            q_m3_s, valid = _dc_flow_m3_s(edge_data, boundary_node, neighbor)
+            if not valid:
+                continue
         idx = node_index[modeled_node]
-        injections[idx] += float(q_m3_s * sign)
+        # q_m3_s is defined in the solver-ready sign convention:
+        # positive means injected into the network, negative means extracted.
+        injections[idx] += float(q_m3_s)
         boundary_kind[idx] = str(node_data.get("boundary_type"))
     return injections, boundary_kind
+
+
+def _rebalance_boundary_injections(
+    graph,
+    injections: np.ndarray,
+    boundary_kind: list[str],
+) -> np.ndarray:
+    convention = str(graph.graph.get("bc_harmonics_convention", "")).strip().lower()
+    source_mask = np.asarray([kind == "source" for kind in boundary_kind], dtype=bool)
+    sink_mask = np.asarray([kind == "sink" for kind in boundary_kind], dtype=bool)
+    if not np.any(source_mask) or not np.any(sink_mask):
+        return injections
+    source_total = float(np.sum(injections[source_mask]))
+    sink_total = float(np.sum(injections[sink_mask]))
+    if not (math.isfinite(source_total) and math.isfinite(sink_total)):
+        return injections
+    if source_total <= 0.0 or sink_total >= 0.0:
+        return injections
+    net = source_total + sink_total
+    if abs(net) <= 1.0e-18:
+        return injections
+    # Canonical solver-ready boundary harmonics can carry a small DC mismatch.
+    # Preserve source inflows and rescale sinks so total injection is exactly zero.
+    if convention == "solver_ready":
+        balanced = np.asarray(injections, dtype=np.float32).copy()
+        sink_scale = source_total / max(-sink_total, 1.0e-30)
+        balanced[sink_mask] = balanced[sink_mask] * float(sink_scale)
+        return balanced
+    return injections
 
 
 def _reference_pressure_node(node_ids: list[object], boundary_kind: list[str]) -> int:
@@ -491,6 +530,7 @@ def build_real_gnn_data(graph_path: Path, config: dict) -> RealGNNData:
         )
 
     injections, boundary_kind = _boundary_injections(graph, node_ids, node_index)
+    injections = _rebalance_boundary_injections(graph, injections, boundary_kind)
     reference_node = _reference_pressure_node(node_ids, boundary_kind)
     source_node_mask = np.asarray([kind == "source" for kind in boundary_kind], dtype=bool)
     sink_node_mask = np.asarray([kind == "sink" for kind in boundary_kind], dtype=bool)

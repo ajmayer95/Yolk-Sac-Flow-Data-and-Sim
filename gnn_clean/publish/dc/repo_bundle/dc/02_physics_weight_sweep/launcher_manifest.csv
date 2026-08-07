@@ -1,0 +1,2 @@
+run_name,model_family,lambda_q,lambda_k,lambda_b,lambda_delta,message_passing_layers,graph_path,device,seed,epochs,viscosity_pa_s,status,run_dir
+q_0p1__k_0p1__delta_0p1,gnn,0.1,0.1,100.0,0.1,2,/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/datasets/harmonized_scaled_dataset.gpickle,cuda,0,100,0.0035,completed,/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs/dc/02_physics_weight_sweep/gnn/q_0p1__k_0p1__delta_0p1

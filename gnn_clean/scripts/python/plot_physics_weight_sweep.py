@@ -15,9 +15,13 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
+from matplotlib.colors import LogNorm, Normalize
 import numpy as np
 import pandas as pd
+
+from physics_weight_sweep_lib import classify_weighting_regime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_ROOT = PROJECT_ROOT / "outputs" / "dc" / "02_physics_weight_sweep"
@@ -48,6 +52,9 @@ REGIME_PREFIX = {
     "correction_regularized": "C",
 }
 OBSOLETE_OUTPUTS = (
+    "flow_kirchhoff_normalized_violation_pareto.png",
+    "flow_kirchhoff_pareto_labeled.png",
+    "flow_kirchhoff_pareto_no_selected_stars.png",
     "flow_kirchhoff_pareto_annotated.png",
     "flow_kirchhoff_pareto.pdf",
     "flow_kirchhoff_pareto_labeled.pdf",
@@ -161,7 +168,6 @@ def filter_valid(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
 
 def save(fig: plt.Figure, path: Path, dpi: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
@@ -177,7 +183,7 @@ def label_for_regime(regime: str) -> str:
     return REGIME_LABELS.get(regime, regime.replace("_", " ").title())
 
 
-def weighting_regime_legend_handles(include_pareto: bool, include_baseline: bool) -> list[Line2D]:
+def weighting_regime_legend_handles(include_baseline: bool) -> list[Line2D]:
     handles = [
         Line2D(
             [0],
@@ -204,20 +210,6 @@ def weighting_regime_legend_handles(include_pareto: bool, include_baseline: bool
                 markersize=7,
                 alpha=0.8,
                 label="Poiseuille baseline",
-            )
-        )
-    if include_pareto:
-        handles.append(
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                linestyle="None",
-                markerfacecolor="none",
-                markeredgecolor="#202020",
-                markeredgewidth=1.2,
-                markersize=8.5,
-                label="GNN Pareto front",
             )
         )
     return handles
@@ -258,6 +250,13 @@ def build_label_lookup(rep_df: pd.DataFrame) -> pd.DataFrame:
 def merge_representative_labels(rep_df: pd.DataFrame, label_df: pd.DataFrame) -> pd.DataFrame:
     if rep_df.empty:
         return rep_df.copy()
+    if "plot_label" in rep_df.columns:
+        result = rep_df.copy()
+        existing = result["plot_label"].astype("string")
+        lookup = label_df[["run_name", "plot_label"]].drop_duplicates(subset=["run_name"]).copy()
+        fill_map = dict(zip(lookup["run_name"].astype(str), lookup["plot_label"].astype(str)))
+        result["plot_label"] = existing.fillna(result["run_name"].astype(str).map(fill_map))
+        return result
     return rep_df.merge(label_df[["run_name", "plot_label"]], on="run_name", how="left")
 
 
@@ -308,6 +307,20 @@ def prepare_data(
         ["flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s"],
     )
     pois_summary = numeric(pois_summary, common_numeric)
+    if "weighting_regime" not in pois_summary.columns:
+        pois_summary["weighting_regime"] = ""
+    pois_summary["weighting_regime"] = [
+        classify_weighting_regime(
+            safe_float(row.get("lambda_q")),
+            safe_float(row.get("lambda_k")),
+            0.0,
+        )
+        for _, row in pois_summary.iterrows()
+    ]
+    if "is_pareto_front" in pois_summary.columns:
+        pois_summary["is_pareto_front"] = pois_summary["is_pareto_front"].fillna(False).astype(bool)
+    else:
+        pois_summary["is_pareto_front"] = False
 
     rep_prepped = filter_valid(
         rep_df.copy(),
@@ -438,45 +451,16 @@ def plot_nonselected_gnn(ax: plt.Axes, df: pd.DataFrame, x: str, y: str) -> None
         )
 
 
-def overlay_pareto_highlights(
-    ax: plt.Axes,
-    gnn_df: pd.DataFrame,
-    x: str,
-    y: str,
-    global_front_mask: pd.Series | None = None,
-) -> None:
-    front = gnn_df[gnn_df["is_pareto_front"] == True].copy()
-    if not front.empty:
-        ax.scatter(
-            front[x],
-            front[y],
-            s=64,
-            facecolors="none",
-            edgecolors="#202020",
-            linewidths=1.2,
-            zorder=3,
-        )
-    if global_front_mask is not None and bool(global_front_mask.any()):
-        global_front = gnn_df[global_front_mask].copy()
-        ax.scatter(
-            global_front[x],
-            global_front[y],
-            s=84,
-            facecolors="none",
-            edgecolors="#8a8a8a",
-            linewidths=0.9,
-            linestyles="dashed",
-            zorder=2.8,
-        )
-
-
 def build_tradeoff_envelope_curve(
     front: pd.DataFrame,
     pois_df: pd.DataFrame,
     x: str,
     y: str,
+    x_domain: tuple[float, float] | None = None,
+    *,
+    loss_mode: str = "absolute",
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    if front.empty or pois_df.empty:
+    if front.empty:
         return None
     front_coords = (
         front[[x, y]]
@@ -486,68 +470,125 @@ def build_tradeoff_envelope_curve(
         .sort_values(x)
         .drop_duplicates(subset=[x, y])
     )
-    pois_coords = (
-        pois_df[[x, y]]
-        .apply(pd.to_numeric, errors="coerce")
-        .replace([np.inf, -np.inf], np.nan)
-        .dropna()
-    )
-    if front_coords.empty or pois_coords.empty:
+    if front_coords.empty:
         return None
     x_values = front_coords[x].to_numpy(dtype=float)
     y_values = front_coords[y].to_numpy(dtype=float)
-    x_limit = float(pois_coords[x].mean())
-    y_limit = float(pois_coords[y].mean())
-    x_min = float(np.min(x_values))
-    b_min = max(-x_min + 1.0e-6, 1.0e-6)
-    b_candidates = np.concatenate(
-        [
-            np.array([0.0], dtype=float),
-            np.geomspace(1.0e-5, 10.0, 400),
-        ]
-    )
+    fit_x_min = float(np.min(x_values))
+    fit_x_max = float(np.max(x_values))
+    # Fit y = a / (x + b) + c by grid-searching b and solving least squares
+    # for a and c. For some datasets, absolute-error fitting overweights the
+    # largest y-values, so we also support log-space scoring for a more balanced
+    # visual hyperbola across the full point set.
+    b_candidates = np.linspace(0.0, max(2.0 * fit_x_max, 1.0), 1200, dtype=float)
     best_params: tuple[float, float, float] | None = None
-    best_loss = float("inf")
+    best_score = float("inf")
     for b in b_candidates:
-        if b < 0.0:
+        basis = 1.0 / (x_values + b)
+        valid = np.isfinite(basis) & np.isfinite(y_values) & ((x_values + b) > 0.0)
+        if int(np.sum(valid)) < 2:
             continue
-        shifted_front = 1.0 / (x_values + b)
-        shifted_limit = 1.0 / (x_limit + b)
-        basis = shifted_front - shifted_limit
-        denom = float(np.dot(basis, basis))
-        if denom <= 0.0 or not np.isfinite(denom):
+        design = np.column_stack([basis[valid], np.ones(int(np.sum(valid)), dtype=float)])
+        target = y_values[valid]
+        try:
+            coeffs, _, _, _ = np.linalg.lstsq(design, target, rcond=None)
+        except np.linalg.LinAlgError:
             continue
-        a = float(np.dot(basis, y_values - y_limit) / denom)
-        y_pred = y_limit + a * basis
-        loss = float(np.mean((y_pred - y_values) ** 2))
-        if np.isfinite(loss) and loss < best_loss:
-            best_loss = loss
-            best_params = (a, b, y_limit)
+        a = float(coeffs[0])
+        c = float(coeffs[1])
+        if not (np.isfinite(a) and np.isfinite(c)):
+            continue
+        y_pred = a * basis[valid] + c
+        if not np.all(np.isfinite(y_pred)):
+            continue
+        if loss_mode == "log":
+            positive = (target > 0.0) & (y_pred > 0.0)
+            if int(np.sum(positive)) < 2:
+                continue
+            score = float(
+                np.mean(
+                    (
+                        np.log(y_pred[positive])
+                        - np.log(target[positive])
+                    )
+                    ** 2
+                )
+            )
+        else:
+            score = float(np.mean((y_pred - target) ** 2))
+        if np.isfinite(score) and score < best_score:
+            best_score = score
+            best_params = (a, b, c)
     if best_params is None:
         return None
     a, b, c = best_params
-    x_fit = np.linspace(x_min, x_limit, 256)
-    y_fit = c + a * (1.0 / (x_fit + b) - 1.0 / (x_limit + b))
+    if x_domain is None:
+        x_min = fit_x_min
+        x_max = fit_x_max
+    else:
+        x_min = float(min(x_domain))
+        x_max = float(max(x_domain))
+    x_fit = np.linspace(x_min, x_max, 512)
+    y_fit = a / (x_fit + b) + c
     return x_fit, y_fit
+
+
+def pareto_front_subset(df: pd.DataFrame, x: str, y: str) -> pd.DataFrame:
+    coords = (
+        df[[x, y]]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    valid = coords.notna().all(axis=1)
+    if not bool(valid.any()):
+        return df.iloc[0:0].copy()
+    work = df.loc[valid].copy()
+    x_values = pd.to_numeric(work[x], errors="coerce").to_numpy(dtype=float)
+    y_values = pd.to_numeric(work[y], errors="coerce").to_numpy(dtype=float)
+    keep = np.ones(len(work), dtype=bool)
+    for i in range(len(work)):
+        for j in range(len(work)):
+            if i == j:
+                continue
+            if (
+                x_values[j] <= x_values[i]
+                and y_values[j] <= y_values[i]
+                and (x_values[j] < x_values[i] or y_values[j] < y_values[i])
+            ):
+                keep[i] = False
+                break
+    return work.loc[keep].copy()
 
 
 def plot_tradeoff_fit_curve(
     ax: plt.Axes,
-    gnn_df: pd.DataFrame,
-    pois_df: pd.DataFrame,
+    df: pd.DataFrame,
     x: str,
     y: str,
+    x_domain: tuple[float, float] | None = None,
+    *,
+    color: str,
+    linestyle: str,
+    fit_subset: str = "pareto",
+    loss_mode: str = "absolute",
 ) -> None:
-    front = gnn_df[gnn_df["is_pareto_front"] == True].copy()
-    fit = build_tradeoff_envelope_curve(front, pois_df, x, y)
+    if fit_subset == "all":
+        front = df.copy()
+    else:
+        if "is_pareto_front" in df.columns and bool(df["is_pareto_front"].fillna(False).astype(bool).any()):
+            front = df[df["is_pareto_front"] == True].copy()
+        else:
+            front = pareto_front_subset(df, x, y)
+    fit = build_tradeoff_envelope_curve(front, df, x, y, x_domain=x_domain, loss_mode=loss_mode)
     if fit is None:
         return
     x_fit, y_fit = fit
     ax.plot(
         x_fit,
         y_fit,
-        color="#111111",
+        color=color,
         linewidth=1.8,
+        linestyle=linestyle,
         alpha=0.9,
         zorder=2.6,
     )
@@ -556,60 +597,20 @@ def plot_tradeoff_fit_curve(
 def plot_poiseuille(ax: plt.Axes, pois_df: pd.DataFrame, x: str, y: str) -> None:
     if pois_df.empty:
         return
-    ax.scatter(
-        pois_df[x],
-        pois_df[y],
-        marker="D",
-        s=40,
-        color="#9a9a9a",
-        edgecolors="#5f5f5f",
-        linewidths=0.5,
-        alpha=0.75,
-        zorder=2,
-    )
-
-
-def plot_selected_stars(ax: plt.Axes, rep_df: pd.DataFrame, x: str, y: str) -> None:
-    if rep_df.empty:
-        return
-    ax.scatter(
-        rep_df[x],
-        rep_df[y],
-        marker="*",
-        s=95,
-        color="#111111",
-        edgecolors="white",
-        linewidths=0.6,
-        alpha=1.0,
-        zorder=4,
-    )
-
-
-def annotate_selected_labels(ax: plt.Axes, rep_df: pd.DataFrame, x: str, y: str) -> None:
-    rep_df = rep_df[pd.to_numeric(rep_df["selection_rank_within_regime"], errors="coerce") <= 2].copy()
-    offset_map = {
-        "F1": (8, 8),
-        "F2": (8, -10),
-        "B1": (8, 10),
-        "B2": (-18, 10),
-        "K1": (-18, 8),
-        "K2": (-18, -10),
-        "C1": (8, 12),
-        "C2": (-18, 12),
-    }
-    for _, row in rep_df.iterrows():
-        label = str(row.get("plot_label", ""))
-        if not label:
+    for regime in REGIME_ORDER:
+        subset = pois_df[pois_df["weighting_regime"] == regime]
+        if subset.empty:
             continue
-        dx, dy = offset_map.get(label, (8, 8))
-        ax.annotate(
-            label,
-            xy=(row[x], row[y]),
-            xytext=(dx, dy),
-            textcoords="offset points",
-            fontsize=9,
-            color="#111111",
-            zorder=5,
+        ax.scatter(
+            subset[x],
+            subset[y],
+            marker="D",
+            s=40,
+            color=REGIME_COLORS[regime],
+            edgecolors="#5f5f5f",
+            linewidths=0.5,
+            alpha=0.55,
+            zorder=2,
         )
 
 
@@ -626,14 +627,36 @@ def base_axes(title: str, xlabel: str, ylabel: str) -> tuple[plt.Figure, plt.Axe
 
 def add_legend(
     ax: plt.Axes,
-    include_pareto: bool,
     include_baseline: bool,
-    include_selected_representative: bool,
     include_tradeoff_fit: bool = False,
+    include_poiseuille_fit: bool = False,
 ) -> None:
-    handles = weighting_regime_legend_handles(
-        include_pareto=include_pareto,
-        include_baseline=include_baseline,
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="None",
+            markerfacecolor=REGIME_COLORS[regime],
+            markeredgecolor="none",
+            markersize=7,
+            alpha=0.9,
+            label=label_for_regime(regime),
+        )
+        for regime in REGIME_ORDER
+    ]
+    handles.append(
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="None",
+            markerfacecolor="#7f7f7f",
+            markeredgecolor="none",
+            markersize=7,
+            alpha=0.9,
+            label="GNN",
+        )
     )
     if include_tradeoff_fit:
         handles.append(
@@ -642,21 +665,33 @@ def add_legend(
                 [0],
                 color="#111111",
                 linewidth=1.8,
-                label="Hyperbola-style fit to Poiseuille limit",
+                linestyle="--",
+                label="GNN Trade-off Fit",
             )
         )
-    if include_selected_representative:
+    if include_baseline:
         handles.append(
             Line2D(
                 [0],
                 [0],
-                marker="*",
+                marker="D",
                 linestyle="None",
-                markerfacecolor="#111111",
-                markeredgecolor="white",
-                markeredgewidth=0.6,
-                markersize=10,
-                label="Selected representative",
+                markerfacecolor="#7f7f7f",
+                markeredgecolor="#5f5f5f",
+                markersize=7,
+                alpha=0.8,
+                label="Poiseuille baseline",
+            )
+        )
+    if include_poiseuille_fit:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color="#5f5f5f",
+                linewidth=1.8,
+                linestyle=":",
+                label="Poiseuille Trade-off Fit",
             )
         )
     ax.legend(handles=handles, frameon=False, loc="best")
@@ -665,11 +700,8 @@ def add_legend(
 def plot_pareto(
     gnn_df: pd.DataFrame,
     pois_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
     output_dir: Path,
     dpi: int,
-    label_selected: bool,
-    show_selected_stars: bool,
     filename: str,
 ) -> None:
     fig, ax = base_axes(
@@ -678,68 +710,70 @@ def plot_pareto(
         "Kirchhoff RMS per internal node (nL/s)",
     )
     plot_nonselected_gnn(ax, gnn_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
-    overlay_pareto_highlights(
-        ax,
-        gnn_df,
-        "flow_rmse_nl_s",
-        "kirchhoff_rms_per_internal_node_nl_s",
-    )
     plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
-    if show_selected_stars:
-        plot_selected_stars(ax, rep_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
-    if label_selected and show_selected_stars:
-        annotate_selected_labels(ax, rep_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
-    add_legend(
-        ax,
-        include_pareto=True,
-        include_baseline=True,
-        include_selected_representative=show_selected_stars,
-    )
+    add_legend(ax, include_baseline=True)
     save(fig, output_dir / filename, dpi=dpi)
 
 
 def plot_pareto_with_tradeoff_fit(
     gnn_df: pd.DataFrame,
     pois_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
     output_dir: Path,
     dpi: int,
     filename: str,
 ) -> None:
     fig, ax = base_axes(
-        "Flow-conservation trade-off with frontier fit",
+        "Flow-conservation trade-off with trade-off fits",
         "Flow RMSE (nL/s)",
         "Kirchhoff RMS per internal node (nL/s)",
     )
     plot_nonselected_gnn(ax, gnn_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    ref_fig, ref_ax = base_axes(
+        "",
+        "Flow RMSE (nL/s)",
+        "Kirchhoff RMS per internal node (nL/s)",
+    )
+    plot_nonselected_gnn(ref_ax, gnn_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    plot_poiseuille(ref_ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    scatter_xlim = ref_ax.get_xlim()
+    scatter_ylim = ref_ax.get_ylim()
+    plt.close(ref_fig)
     plot_tradeoff_fit_curve(
         ax,
         gnn_df,
+        "flow_rmse_nl_s",
+        "kirchhoff_rms_per_internal_node_nl_s",
+        x_domain=scatter_xlim,
+        color="#111111",
+        linestyle="--",
+        fit_subset="pareto",
+        loss_mode="absolute",
+    )
+    plot_tradeoff_fit_curve(
+        ax,
         pois_df,
         "flow_rmse_nl_s",
         "kirchhoff_rms_per_internal_node_nl_s",
-    )
-    overlay_pareto_highlights(
-        ax,
-        gnn_df,
-        "flow_rmse_nl_s",
-        "kirchhoff_rms_per_internal_node_nl_s",
+        x_domain=scatter_xlim,
+        color="#5f5f5f",
+        linestyle=":",
+        fit_subset="all",
+        loss_mode="log",
     )
     plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
-    plot_selected_stars(ax, rep_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    ax.set_xlim(scatter_xlim)
+    ax.set_ylim(scatter_ylim)
     add_legend(
         ax,
-        include_pareto=True,
         include_baseline=True,
-        include_selected_representative=True,
         include_tradeoff_fit=True,
+        include_poiseuille_fit=True,
     )
     save(fig, output_dir / filename, dpi=dpi)
 
 
 def plot_delta_metric(
     gnn_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
     output_dir: Path,
     dpi: int,
     y_column: str,
@@ -748,17 +782,14 @@ def plot_delta_metric(
     filename: str,
 ) -> None:
     df = filter_valid(gnn_df, ["delta_rms", y_column])
-    rep = filter_valid(rep_df, ["delta_rms", y_column])
     fig, ax = base_axes(title, "Correction RMS", y_label)
     plot_nonselected_gnn(ax, df, "delta_rms", y_column)
-    plot_selected_stars(ax, rep, "delta_rms", y_column)
-    add_legend(ax, include_pareto=False, include_baseline=False, include_selected_representative=True)
+    add_legend(ax, include_baseline=False)
     save(fig, output_dir / filename, dpi=dpi)
 
 
 def plot_lambda_ratio_metric(
     gnn_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
     output_dir: Path,
     dpi: int,
     y_column: str,
@@ -767,18 +798,15 @@ def plot_lambda_ratio_metric(
     filename: str,
 ) -> None:
     df = filter_valid(gnn_df, ["jittered_log_q_over_k", y_column])
-    rep = filter_valid(rep_df, ["jittered_log_q_over_k", y_column])
-    fig, ax = base_axes(title, "log10(lambda_Q / lambda_K)", y_label)
+    fig, ax = base_axes(title, r"$\log_{10}(\lambda_Q / \lambda_K)$", y_label)
     plot_nonselected_gnn(ax, df, "jittered_log_q_over_k", y_column)
-    plot_selected_stars(ax, rep, "jittered_log_q_over_k", y_column)
     ax.axvline(0.0, color="#6f6f6f", linewidth=1.0, linestyle="--", alpha=0.7, zorder=0)
-    add_legend(ax, include_pareto=False, include_baseline=False, include_selected_representative=True)
+    add_legend(ax, include_baseline=False)
     save(fig, output_dir / filename, dpi=dpi)
 
 
 def plot_lambda_ratio_by_delta(
     gnn_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
     output_dir: Path,
     dpi: int,
     y_column: str,
@@ -787,7 +815,6 @@ def plot_lambda_ratio_by_delta(
     filename: str,
 ) -> None:
     df = filter_valid(gnn_df, ["jittered_log_q_over_k", "lambda_delta", y_column])
-    rep = filter_valid(rep_df, ["jittered_log_q_over_k", "lambda_delta", y_column])
     delta_values = sorted(df["lambda_delta"].dropna().unique())
     if not delta_values:
         return
@@ -801,24 +828,29 @@ def plot_lambda_ratio_by_delta(
         axes = [axes]
     for ax, delta_value in zip(axes, delta_values):
         panel_df = df[df["lambda_delta"] == delta_value]
-        panel_rep = rep[rep["lambda_delta"] == delta_value]
         plot_nonselected_gnn(ax, panel_df, "jittered_log_q_over_k", y_column)
-        plot_selected_stars(ax, panel_rep, "jittered_log_q_over_k", y_column)
         ax.axvline(0.0, color="#6f6f6f", linewidth=1.0, linestyle="--", alpha=0.7, zorder=0)
-        ax.set_title(f"lambda_delta = {delta_value:g}")
-        ax.set_xlabel("log10(lambda_Q / lambda_K)")
+        ax.set_title(rf"$\lambda_\delta = {delta_value:g}$")
+        ax.set_xlabel(r"$\log_{10}(\lambda_Q / \lambda_K)$")
         ax.set_axisbelow(True)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
     axes[0].set_ylabel(y_label)
+    handles = weighting_regime_legend_handles(include_baseline=False)
+    fig.legend(
+        handles=handles,
+        frameon=False,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.94),
+        ncol=min(4, len(handles)),
+    )
     fig.suptitle(title)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.80))
     save(fig, output_dir / filename, dpi=dpi)
 
 
 def plot_lambda_delta_metric(
     gnn_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
     output_dir: Path,
     dpi: int,
     y_column: str,
@@ -827,54 +859,249 @@ def plot_lambda_delta_metric(
     filename: str,
 ) -> None:
     df = filter_valid(gnn_df, ["lambda_delta", y_column])
-    rep = filter_valid(rep_df, ["lambda_delta", y_column])
-    fig, ax = base_axes(title, "lambda_delta", y_label)
+    fig, ax = base_axes(title, r"$\lambda_\delta$", y_label)
     plot_nonselected_gnn(ax, df, "lambda_delta", y_column)
-    plot_selected_stars(ax, rep, "lambda_delta", y_column)
     ax.set_xscale("log")
-    add_legend(ax, include_pareto=False, include_baseline=False, include_selected_representative=True)
+    add_legend(ax, include_baseline=False)
     save(fig, output_dir / filename, dpi=dpi)
 
 
-def plot_normalized_kirchhoff_pareto(
-    gnn_df: pd.DataFrame,
-    pois_df: pd.DataFrame,
-    rep_df: pd.DataFrame,
-    output_dir: Path,
-    dpi: int,
+def field_axes(title: str) -> tuple[plt.Figure, plt.Axes]:
+    fig, ax = plt.subplots(figsize=(6.8, 6.2), constrained_layout=True)
+    ax.set_title(title)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    return fig, ax
+
+
+def bounds_from_nodes(nodes: pd.DataFrame) -> tuple[tuple[float, float], tuple[float, float]]:
+    coords = nodes[["x_px", "y_px"]].apply(pd.to_numeric, errors="coerce")
+    return (
+        (float(coords["x_px"].min()), float(coords["x_px"].max())),
+        (float(coords["y_px"].min()), float(coords["y_px"].max())),
+    )
+
+
+def transform_mosaic_coords(
+    x: pd.Series | np.ndarray,
+    y: pd.Series | np.ndarray,
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+) -> tuple[np.ndarray, np.ndarray]:
+    x_arr = np.asarray(x, dtype=float)
+    y_arr = np.asarray(y, dtype=float)
+    _, x_max = x_bounds
+    _, y_max = y_bounds
+    return y_max - y_arr, x_max - x_arr
+
+
+def transform_segments(
+    segments: list[np.ndarray],
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+) -> list[np.ndarray]:
+    transformed: list[np.ndarray] = []
+    for segment in segments:
+        tx, ty = transform_mosaic_coords(segment[:, 0], segment[:, 1], x_bounds, y_bounds)
+        transformed.append(np.column_stack([tx, ty]))
+    return transformed
+
+
+def decorate_field_axes(ax: plt.Axes, x_bounds: tuple[float, float], y_bounds: tuple[float, float]) -> None:
+    ax.set_xlim((0.0, y_bounds[1] - y_bounds[0]))
+    ax.set_ylim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_aspect("equal")
+
+
+def node_lookup(nodes: pd.DataFrame) -> tuple[dict[str, tuple[float, float]], dict[str, tuple[float, float]]]:
+    by_id: dict[str, tuple[float, float]] = {}
+    by_index: dict[str, tuple[float, float]] = {}
+    for _, row in nodes.iterrows():
+        x = safe_float(row.get("x_px"))
+        y = safe_float(row.get("y_px"))
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+        by_id[str(row.get("node_id", ""))] = (x, y)
+        node_index = safe_float(row.get("node_index"))
+        if math.isfinite(node_index):
+            by_index[str(int(node_index))] = (x, y)
+    return by_id, by_index
+
+
+def build_edge_segments(edges: pd.DataFrame, nodes: pd.DataFrame) -> list[np.ndarray]:
+    by_id, by_index = node_lookup(nodes)
+    segments: list[np.ndarray] = []
+    for _, row in edges.iterrows():
+        source_key = str(row.get("source_node", row.get("source", "")))
+        target_key = str(row.get("target_node", row.get("target", "")))
+        a = by_id.get(source_key) or by_index.get(source_key)
+        b = by_id.get(target_key) or by_index.get(target_key)
+        if a is None or b is None:
+            continue
+        segments.append(np.asarray([[a[0], a[1]], [b[0], b[1]]], dtype=float))
+    return segments
+
+
+def draw_boundary_markers_field(
+    ax: plt.Axes,
+    nodes: pd.DataFrame,
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
 ) -> None:
-    df = filter_valid(gnn_df, ["flow_rmse_nl_s", "normalized_kirchhoff_violation"])
-    pois = filter_valid(pois_df, ["flow_rmse_nl_s", "normalized_kirchhoff_violation"])
-    reps = filter_valid(rep_df, ["flow_rmse_nl_s", "normalized_kirchhoff_violation"])
-    gnn_mask = mad_inlier_mask(df["normalized_kirchhoff_violation"])
-    pois_mask = mad_inlier_mask(pois["normalized_kirchhoff_violation"]) if not pois.empty else pd.Series(dtype=bool)
-    df = df.loc[gnn_mask].copy()
-    if not pois.empty:
-        pois = pois.loc[pois_mask].copy()
-    if not reps.empty:
-        allowed_names = set(df["run_name"].astype(str))
-        reps = reps[reps["run_name"].astype(str).isin(allowed_names)].copy()
-    fig, ax = base_axes(
-        "Flow-conservation trade-off",
-        "Flow RMSE (nL/s)",
-        "Kirchhoff violation RMS per internal node: sum(Q_i) / sum(abs(Q_i))",
-    )
-    plot_nonselected_gnn(ax, df, "flow_rmse_nl_s", "normalized_kirchhoff_violation")
-    overlay_pareto_highlights(
-        ax,
-        df,
-        "flow_rmse_nl_s",
-        "normalized_kirchhoff_violation",
-    )
-    plot_poiseuille(ax, pois, "flow_rmse_nl_s", "normalized_kirchhoff_violation")
-    plot_selected_stars(ax, reps, "flow_rmse_nl_s", "normalized_kirchhoff_violation")
-    add_legend(
-        ax,
-        include_pareto=True,
-        include_baseline=True,
-        include_selected_representative=True,
-    )
-    save(fig, output_dir / "flow_kirchhoff_normalized_violation_pareto.png", dpi=dpi)
+    arterial = nodes[nodes["is_arterial"].astype(str).str.lower().isin({"true", "1", "yes"})] if "is_arterial" in nodes.columns else nodes.iloc[0:0]
+    venous = nodes[nodes["is_venous"].astype(str).str.lower().isin({"true", "1", "yes"})] if "is_venous" in nodes.columns else nodes.iloc[0:0]
+    if not arterial.empty:
+        ax.scatter(*transform_mosaic_coords(arterial["x_px"], arterial["y_px"], x_bounds, y_bounds), marker="^", color="black", s=18, zorder=4)
+    if not venous.empty:
+        ax.scatter(*transform_mosaic_coords(venous["x_px"], venous["y_px"], x_bounds, y_bounds), marker="s", color="black", s=16, zorder=4)
+
+
+def first_populated_numeric_column(df: pd.DataFrame, columns: list[str]) -> np.ndarray:
+    for column in columns:
+        if column not in df.columns:
+            continue
+        values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+        if np.isfinite(values).any():
+            if column == "q_pred_m3_s":
+                values = values * 1.0e12
+            return values
+    return np.full((len(df),), np.nan, dtype=float)
+
+
+def log_widths(values: np.ndarray) -> np.ndarray:
+    return 0.5 + 2.0 * np.clip(np.log10(np.clip(np.abs(values), 1.0e-6, None)) + 3.0, 0.0, 3.0) / 3.0
+
+
+def load_field_tables(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    node_df = numeric(pd.read_csv(run_dir / "node_predictions.csv"), ["node_index", "x_px", "y_px", "pressure_pa"])
+    edge_df = numeric(pd.read_csv(run_dir / "edge_predictions.csv"), ["predicted_flow_nl_s", "predicted_flow_physical_nl_s", "q_pred_m3_s", "delta_e"])
+    return node_df, edge_df
+
+
+def plot_field_set(run_dir: Path, output_dir: Path, stem_prefix: str, title_prefix: str, dpi: int) -> None:
+    nodes, edges = load_field_tables(run_dir)
+    x_bounds, y_bounds = bounds_from_nodes(nodes)
+    segments = transform_segments(build_edge_segments(edges, nodes), x_bounds, y_bounds)
+    keep = np.asarray([np.isfinite(segment).all() for segment in segments], dtype=bool) if segments else np.asarray([], dtype=bool)
+    segments = [segment for segment, ok in zip(segments, keep) if ok]
+
+    flow_values = first_populated_numeric_column(edges, ["predicted_flow_physical_nl_s", "predicted_flow_nl_s", "q_pred_m3_s"])
+    if keep.size:
+        flow_values = flow_values[keep]
+    flow_mag_values = np.abs(flow_values)
+    if "delta_e" in edges.columns:
+        correction_values = pd.to_numeric(edges["delta_e"], errors="coerce").to_numpy(dtype=float)
+    else:
+        correction_values = np.zeros(len(edges), dtype=float)
+    if keep.size:
+        correction_values = correction_values[keep]
+    pressure_values = pd.to_numeric(nodes["pressure_pa"], errors="coerce").to_numpy(dtype=float)
+
+    fig, ax = field_axes(f"{title_prefix} Flow Field")
+    if segments:
+        collection = LineCollection(segments, cmap="coolwarm", linewidths=1.15, zorder=2)
+        finite = flow_values[np.isfinite(flow_values)]
+        vmax = max(float(np.nanpercentile(np.abs(finite), 95.0)), 1.0e-12) if finite.size else 1.0
+        collection.set_array(flow_values)
+        collection.set_clim(-vmax, vmax)
+        ax.add_collection(collection)
+        cbar = fig.colorbar(collection, ax=ax, shrink=0.88, pad=0.02)
+        cbar.set_label("Predicted flow (nL/s)")
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
+    decorate_field_axes(ax, x_bounds, y_bounds)
+    save(fig, output_dir / f"{stem_prefix}_flow_field.png", dpi=dpi)
+
+    fig, ax = field_axes(f"{title_prefix} Flow Amplitude")
+    if segments:
+        finite_positive = flow_mag_values[np.isfinite(flow_mag_values) & (flow_mag_values > 0.0)]
+        background = LineCollection(segments, colors="#d0cbc4", linewidths=0.5, alpha=0.35, zorder=1)
+        ax.add_collection(background)
+        collection = LineCollection(
+            segments,
+            cmap="coolwarm",
+            norm=LogNorm(
+                vmin=max(float(np.nanpercentile(finite_positive, 1.0)), 1.0e-3) if finite_positive.size else 1.0e-3,
+                vmax=max(float(np.nanpercentile(finite_positive, 99.5)), 1.0e-3) if finite_positive.size else 1.0,
+            ),
+            linewidths=log_widths(flow_mag_values if flow_mag_values.size else np.asarray([1.0])),
+            zorder=2,
+        )
+        collection.set_array(np.clip(flow_mag_values if flow_mag_values.size else np.asarray([1.0]), 1.0e-12, None))
+        ax.add_collection(collection)
+        cbar = fig.colorbar(collection, ax=ax, shrink=0.88, pad=0.02)
+        cbar.set_label("Predicted flow amplitude |Q| (nL/s)")
+        node_x, node_y = transform_mosaic_coords(nodes["x_px"], nodes["y_px"], x_bounds, y_bounds)
+        ax.scatter(node_x, node_y, s=3, c="#5f5f5f", linewidths=0.0, zorder=3)
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
+    decorate_field_axes(ax, x_bounds, y_bounds)
+    save(fig, output_dir / f"{stem_prefix}_flow_amplitude_field.png", dpi=dpi)
+
+    fig, ax = field_axes(f"{title_prefix} Pressure Field")
+    if segments:
+        ax.add_collection(LineCollection(segments, colors="#d0d0d0", linewidths=0.55, zorder=1))
+    node_x, node_y = transform_mosaic_coords(nodes["x_px"], nodes["y_px"], x_bounds, y_bounds)
+    scatter = ax.scatter(node_x, node_y, c=pressure_values, cmap="viridis", s=12, zorder=2)
+    finite_pressure = pressure_values[np.isfinite(pressure_values)]
+    if finite_pressure.size:
+        scatter.set_clim(float(np.nanpercentile(finite_pressure, 2.5)), float(np.nanpercentile(finite_pressure, 97.5)))
+    cbar = fig.colorbar(scatter, ax=ax, shrink=0.88, pad=0.02)
+    cbar.set_label("Pressure [Pa]")
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
+    decorate_field_axes(ax, x_bounds, y_bounds)
+    save(fig, output_dir / f"{stem_prefix}_pressure_field.png", dpi=dpi)
+
+    fig, ax = field_axes(f"{title_prefix} Correction Field")
+    if segments:
+        vmax = max(float(np.nanpercentile(np.abs(correction_values[np.isfinite(correction_values)]), 99.5)), 1.0e-6) if np.isfinite(correction_values).any() else 1.0
+        collection = LineCollection(
+            segments,
+            cmap="coolwarm",
+            norm=Normalize(vmin=-vmax, vmax=vmax),
+            linewidths=log_widths(np.abs(flow_mag_values) if flow_mag_values.size else np.asarray([1.0])),
+            zorder=2,
+        )
+        collection.set_array(correction_values if correction_values.size else np.asarray([0.0]))
+        background = LineCollection(segments, colors="#d0cbc4", linewidths=0.5, alpha=0.35, zorder=1)
+        ax.add_collection(background)
+        ax.add_collection(collection)
+        cbar = fig.colorbar(collection, ax=ax, shrink=0.88, pad=0.02)
+        cbar.set_label(r"Correction field $\delta_e$")
+        node_x, node_y = transform_mosaic_coords(nodes["x_px"], nodes["y_px"], x_bounds, y_bounds)
+        ax.scatter(node_x, node_y, s=3, c="#5f5f5f", linewidths=0.0, zorder=3)
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
+    decorate_field_axes(ax, x_bounds, y_bounds)
+    save(fig, output_dir / f"{stem_prefix}_correction_field.png", dpi=dpi)
+
+
+def select_poiseuille_baseline_row(pois_df: pd.DataFrame) -> pd.Series:
+    preferred = pois_df[
+        (pd.to_numeric(pois_df["lambda_q"], errors="coerce") == 1.0)
+        & (pd.to_numeric(pois_df["lambda_k"], errors="coerce") == 1.0)
+    ]
+    if not preferred.empty:
+        return preferred.iloc[0]
+    return pois_df.iloc[0]
+
+
+def plot_representative_field_sets(rep_df: pd.DataFrame, pois_df: pd.DataFrame, output_dir: Path, dpi: int) -> None:
+    field_dir = output_dir / "representative_fields"
+    wanted = {"F1", "B1", "K1", "C1"}
+    selected = rep_df[rep_df["plot_label"].astype(str).isin(wanted)].copy()
+    for _, row in selected.iterrows():
+        run_dir = Path(str(row["output_dir"])).expanduser().resolve()
+        label = str(row["plot_label"])
+        plot_field_set(run_dir, field_dir, label, label, dpi)
+    if not pois_df.empty and "output_dir" in pois_df.columns:
+        baseline_row = select_poiseuille_baseline_row(pois_df)
+        plot_field_set(
+            Path(str(baseline_row["output_dir"])).expanduser().resolve(),
+            field_dir,
+            "poiseuille_baseline",
+            "Poiseuille Baseline",
+            dpi,
+        )
 
 
 def write_representative_plot_labels(output_dir: Path, label_df: pd.DataFrame) -> None:
@@ -917,47 +1144,23 @@ def main() -> None:
     rep_prepped = attach_normalized_kirchhoff_violation(rep_prepped)
 
     write_representative_plot_labels(paths["output_dir"], label_df)
+    maybe_clean_obsolete(paths["output_dir"])
     plot_pareto(
         gnn_df=gnn_all,
         pois_df=pois_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
-        label_selected=False,
-        show_selected_stars=True,
         filename="flow_kirchhoff_pareto.png",
-    )
-    plot_pareto(
-        gnn_df=gnn_all,
-        pois_df=pois_summary,
-        rep_df=rep_prepped,
-        output_dir=paths["output_dir"],
-        dpi=args.dpi,
-        label_selected=True,
-        show_selected_stars=True,
-        filename="flow_kirchhoff_pareto_labeled.png",
-    )
-    plot_pareto(
-        gnn_df=gnn_all,
-        pois_df=pois_summary,
-        rep_df=rep_prepped,
-        output_dir=paths["output_dir"],
-        dpi=args.dpi,
-        label_selected=False,
-        show_selected_stars=False,
-        filename="flow_kirchhoff_pareto_no_selected_stars.png",
     )
     plot_pareto_with_tradeoff_fit(
         gnn_df=gnn_all,
         pois_df=pois_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         filename="flow_kirchhoff_pareto_with_fit.png",
     )
     plot_delta_metric(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="flow_rmse_nl_s",
@@ -967,7 +1170,6 @@ def main() -> None:
     )
     plot_delta_metric(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="kirchhoff_rms_per_internal_node_nl_s",
@@ -977,7 +1179,6 @@ def main() -> None:
     )
     plot_lambda_ratio_metric(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="flow_rmse_nl_s",
@@ -987,7 +1188,6 @@ def main() -> None:
     )
     plot_lambda_ratio_metric(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="kirchhoff_rms_per_internal_node_nl_s",
@@ -997,7 +1197,6 @@ def main() -> None:
     )
     plot_lambda_delta_metric(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="delta_rms",
@@ -1007,7 +1206,6 @@ def main() -> None:
     )
     plot_lambda_delta_metric(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="flow_rmse_nl_s",
@@ -1015,16 +1213,8 @@ def main() -> None:
         title="Flow error versus correction weight",
         filename="supp_flow_rmse_vs_lambda_delta.png",
     )
-    plot_normalized_kirchhoff_pareto(
-        gnn_df=gnn_all,
-        pois_df=pois_summary,
-        rep_df=rep_prepped,
-        output_dir=paths["output_dir"],
-        dpi=args.dpi,
-    )
     plot_lambda_ratio_by_delta(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="flow_rmse_nl_s",
@@ -1034,7 +1224,6 @@ def main() -> None:
     )
     plot_lambda_ratio_by_delta(
         gnn_df=gnn_summary,
-        rep_df=rep_prepped,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         y_column="kirchhoff_rms_per_internal_node_nl_s",
@@ -1042,6 +1231,7 @@ def main() -> None:
         title="Conservation error versus relative flow-conservation weighting by correction weight",
         filename="kirchhoff_rms_vs_log_lambda_q_over_k_by_delta.png",
     )
+    plot_representative_field_sets(rep_prepped, pois_summary, paths["output_dir"], args.dpi)
 
 
 if __name__ == "__main__":

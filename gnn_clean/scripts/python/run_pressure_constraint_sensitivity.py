@@ -20,7 +20,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from pressure_constraint_sensitivity_lib import (
     CONSTRAINT_ORDER,
     CONSTRAINT_SPECS,
-    DEFAULT_GRAPH,
     DEFAULT_OUTPUT_ROOT,
     DEFAULT_REPRESENTATIVE_CSV,
     DEFAULT_REPRESENTATIVE_LABELS_CSV,
@@ -41,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--representative-csv", type=Path, default=DEFAULT_REPRESENTATIVE_CSV)
     parser.add_argument("--representative-labels-csv", type=Path, default=DEFAULT_REPRESENTATIVE_LABELS_CSV)
-    parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--graph", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--seed", type=int, default=0)

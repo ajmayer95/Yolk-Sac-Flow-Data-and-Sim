@@ -18,12 +18,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from utils import write_yaml
 
 
-DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "harmonized_scaled_dataset.gpickle"
 DEFAULT_OUTPUT_ROOT = (
     PROJECT_ROOT / "outputs" / "dc" / "01_boundary_parameter_calibration"
 )
 BASELINE_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "poiseuille_only_baseline.py"
-LAMBDA_B_VALUES = (1.0, 10.0, 100.0, 1000.0)
+LAMBDA_B_VALUES = (0.1, 1.0, 10.0, 100.0)
 EXPECTED_RUN_FILES = (
     "summary.csv",
     "summary.yaml",
@@ -53,12 +52,18 @@ COMBINED_COLUMNS = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--graph", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--viscosity-pa-s", type=float, default=3.5e-3)
+    parser.add_argument(
+        "--lambda-b-values",
+        type=float,
+        nargs="*",
+        default=list(LAMBDA_B_VALUES),
+    )
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--aggregate-only", action="store_true")
     return parser.parse_args()
@@ -160,9 +165,10 @@ def main() -> None:
     args = parse_args()
     output_root = args.output_root.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    lambda_b_values = [float(value) for value in args.lambda_b_values]
 
     run_rows: list[dict[str, object]] = []
-    for lambda_b in LAMBDA_B_VALUES:
+    for lambda_b in lambda_b_values:
         run_name = run_name_for_lambda(lambda_b)
         run_dir = output_root / run_name
         should_run = args.overwrite or not all(

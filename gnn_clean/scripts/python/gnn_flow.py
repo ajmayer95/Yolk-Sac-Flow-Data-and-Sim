@@ -32,7 +32,7 @@ from real_data import MU, build_real_gnn_data
 from utils import resolve_device, set_random_seed, write_yaml
 
 
-DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "emb1_mosaic_graph_analyzed.gpickle"
+DEFAULT_GRAPH = PROJECT_ROOT / "datasets" / "harmonized_scaled_dataset.gpickle"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "gnn_flow"
 
 PRESETS = {

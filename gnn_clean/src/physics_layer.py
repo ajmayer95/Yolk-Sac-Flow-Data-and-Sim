@@ -502,6 +502,41 @@ def build_weighted_laplacian_from_incidence(
     return incidence.transpose(0, 1) @ weighted_incidence
 
 
+def solve_least_squares_with_hard_linear_constraints(
+    system_matrix: torch.Tensor,
+    rhs: torch.Tensor,
+    constraint_matrix: torch.Tensor,
+    constraint_rhs: torch.Tensor,
+) -> tuple[torch.Tensor, bool]:
+    """Solve min ||A x - b|| subject to C x = d."""
+
+    n_unknowns = int(system_matrix.shape[1]) if system_matrix.ndim == 2 else 0
+    if n_unknowns == 0:
+        return rhs.new_zeros((0,)), False
+    if constraint_matrix.numel() == 0:
+        return torch.linalg.lstsq(system_matrix, rhs).solution, True
+
+    normal_matrix = system_matrix.transpose(0, 1) @ system_matrix
+    normal_rhs = system_matrix.transpose(0, 1) @ rhs
+    n_constraints = int(constraint_matrix.shape[0])
+    kkt_matrix = system_matrix.new_zeros(
+        (n_unknowns + n_constraints, n_unknowns + n_constraints)
+    )
+    kkt_rhs = rhs.new_zeros((n_unknowns + n_constraints,))
+    kkt_matrix[:n_unknowns, :n_unknowns] = normal_matrix
+    kkt_matrix[:n_unknowns, n_unknowns:] = constraint_matrix.transpose(0, 1)
+    kkt_matrix[n_unknowns:, :n_unknowns] = constraint_matrix
+    kkt_rhs[:n_unknowns] = normal_rhs
+    kkt_rhs[n_unknowns:] = constraint_rhs
+    used_lstsq = False
+    try:
+        solution = torch.linalg.solve(kkt_matrix, kkt_rhs)
+    except RuntimeError:
+        used_lstsq = True
+        solution = torch.linalg.lstsq(kkt_matrix, kkt_rhs).solution
+    return solution[:n_unknowns], used_lstsq
+
+
 def constrained_dc_solve_torch(
     edge_index: torch.Tensor,
     g_edge: torch.Tensor,
@@ -634,9 +669,10 @@ def constrained_dc_solve_equal_A_equal_V_torch(
 
     The two arterial nodes share one pressure variable, the venous nodes are
     grounded to the same pressure, and arterial nodal flows are prescribed.
-    The resulting reduced linear system is solved in least-squares form so the
-    equal-pressure constraints stay hard while the Kirchhoff equations remain
-    compatible with the reduced degrees of freedom.
+    A hard linear flow constraint additionally enforces that total venous
+    outflow equals total prescribed arterial inflow. The remaining reduced
+    Kirchhoff equations are fit in least-squares form subject to those hard
+    constraints.
     """
 
     if device is None:
@@ -684,8 +720,16 @@ def constrained_dc_solve_equal_A_equal_V_torch(
     reduced_rows = torch.nonzero(free_mask, as_tuple=False).flatten()
     reduced_system = (laplacian @ transform).index_select(0, reduced_rows)
     reduced_rhs = source_vector.index_select(0, reduced_rows)
-    lstsq_result = torch.linalg.lstsq(reduced_system, reduced_rhs)
-    reduced_pressure = lstsq_result.solution
+    total_flow_constraint = (laplacian @ transform).index_select(0, venous_nodes).sum(
+        dim=0, keepdim=True
+    )
+    total_flow_rhs = arterial_flows.sum().reshape(1)
+    reduced_pressure, used_lstsq = solve_least_squares_with_hard_linear_constraints(
+        system_matrix=reduced_system,
+        rhs=reduced_rhs,
+        constraint_matrix=total_flow_constraint,
+        constraint_rhs=total_flow_rhs,
+    )
 
     pressure = transform @ reduced_pressure
     pressure[venous_nodes] = 0.0
@@ -700,16 +744,28 @@ def constrained_dc_solve_equal_A_equal_V_torch(
     arterial_residual = nodal_residual[arterial_nodes] if arterial_nodes.numel() else nodal_residual[:0]
     internal_residual = nodal_residual[internal_nodes] if internal_nodes.numel() else nodal_residual[:0]
     constrained_residual = nodal_residual[reduced_rows] if reduced_rows.numel() else nodal_residual[:0]
+    total_flow_balance_residual = (
+        total_flow_constraint @ reduced_pressure - total_flow_rhs
+    )
     diagnostics = {
         "pressure_solver_iterations_used": pressure.new_tensor(1.0),
         "pressure_solver_final_relative_residual": (
             torch.linalg.vector_norm(constrained_residual)
             / torch.linalg.vector_norm(source_vector).clamp_min(1.0e-30)
         ),
+        "pressure_solver_used_lstsq": pressure.new_tensor(1.0 if used_lstsq else 0.0),
         "pressure_solver_reached_max_iterations": pressure.new_tensor(0.0),
         "hard_boundary_constraint_residual_l2": torch.linalg.vector_norm(constrained_residual),
         "hard_boundary_constraint_residual_max": torch.max(torch.abs(constrained_residual))
         if constrained_residual.numel()
+        else pressure.new_tensor(0.0),
+        "hard_total_flow_balance_residual_l2": torch.linalg.vector_norm(
+            total_flow_balance_residual
+        ),
+        "hard_total_flow_balance_residual_max": torch.max(
+            torch.abs(total_flow_balance_residual)
+        )
+        if total_flow_balance_residual.numel()
         else pressure.new_tensor(0.0),
         "internal_kirchhoff_residual_l2": torch.linalg.vector_norm(internal_residual)
         if internal_residual.numel()

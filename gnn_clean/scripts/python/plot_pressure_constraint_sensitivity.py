@@ -26,6 +26,7 @@ from pressure_constraint_sensitivity_lib import (
     DEFAULT_OUTPUT_ROOT,
     representative_label,
 )
+from physics_weight_sweep_lib import classify_weighting_regime
 
 
 REGIME_ORDER = (
@@ -46,10 +47,6 @@ REGIME_LABELS = {
     "conservation_prioritized": "Conservation-prioritized",
     "correction_regularized": "Correction-regularized",
 }
-RANK_MARKERS = {1: "o", 2: "s", 3: "^", 4: "p"}
-RANK_LABELS = {1: "Rank 1", 2: "Rank 2", 3: "Rank 3", 4: "Rank 4"}
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
@@ -142,8 +139,9 @@ def representative_style_df(all_runs: pd.DataFrame) -> pd.DataFrame:
     reps["selection_rank_within_regime"] = pd.to_numeric(
         reps["selection_rank_within_regime"], errors="coerce"
     )
+    reps = reps[reps["selection_rank_within_regime"] == 1].copy()
     reps["plot_label"] = reps["representative_label"]
-    reps["marker"] = reps["selection_rank_within_regime"].map(RANK_MARKERS)
+    reps["marker"] = "o"
     reps["regime_color"] = reps["selection_category"].map(REGIME_COLORS)
     reps["regime_color_name"] = reps["selection_category"].map(REGIME_LABELS)
     reps = reps.sort_values(["selection_category", "selection_rank_within_regime", "plot_label"])
@@ -169,13 +167,11 @@ def write_style_lookup(style_df: pd.DataFrame, output_dir: Path) -> None:
 
 def style_for_row(row: pd.Series) -> dict[str, object]:
     regime = str(row.get("selection_category", ""))
-    rank = int(float(row.get("selection_rank_within_regime", 1)))
     return {
         "color": REGIME_COLORS.get(regime, "#333333"),
-        "marker": RANK_MARKERS.get(rank, "o"),
-        "label": str(row.get("representative_label") or representative_label(regime, rank)),
+        "marker": "o",
+        "label": str(row.get("representative_label") or representative_label(regime, 1)),
         "regime": regime,
-        "rank": rank,
     }
 
 
@@ -188,31 +184,19 @@ def legend_handles() -> list[Line2D]:
                 [0],
                 color=REGIME_COLORS[regime],
                 linewidth=2.2,
-                marker="o",
-                markersize=5,
                 label=REGIME_LABELS[regime],
-            )
-        )
-    for rank in sorted(RANK_MARKERS):
-        handles.append(
-            Line2D(
-                [0],
-                [0],
-                linestyle="None",
-                color="#303030",
-                marker=RANK_MARKERS[rank],
-                markersize=7,
-                label=RANK_LABELS[rank],
             )
         )
     handles.append(
         Line2D(
             [0],
             [0],
-            color="#222222",
-            linewidth=2.2,
+            color="#7f7f7f",
+            linewidth=0.0,
             marker="o",
-            markersize=5,
+            markerfacecolor="#7f7f7f",
+            markeredgecolor="none",
+            markersize=7,
             label="GNN",
         )
     )
@@ -220,37 +204,16 @@ def legend_handles() -> list[Line2D]:
         Line2D(
             [0],
             [0],
-            color="#8a8a8a",
-            linewidth=1.8,
-            linestyle="--",
+            color="#7f7f7f",
+            linewidth=0.0,
             marker="D",
-            markersize=5,
+            markerfacecolor="#b5b5b5",
+            markeredgecolor="#777777",
+            markersize=7,
             label="Poiseuille baseline",
         )
     )
     return handles
-
-
-def endpoint_offset(regime: str, rank: int) -> tuple[float, float]:
-    offsets = {
-        ("flow_prioritized", 1): (8, 8),
-        ("flow_prioritized", 2): (8, -8),
-        ("flow_prioritized", 3): (8, 12),
-        ("flow_prioritized", 4): (8, -12),
-        ("balanced", 1): (8, 8),
-        ("balanced", 2): (8, -8),
-        ("balanced", 3): (8, 12),
-        ("balanced", 4): (8, -12),
-        ("conservation_prioritized", 1): (8, 8),
-        ("conservation_prioritized", 2): (8, -8),
-        ("conservation_prioritized", 3): (8, 12),
-        ("conservation_prioritized", 4): (8, -12),
-        ("correction_regularized", 1): (8, 8),
-        ("correction_regularized", 2): (8, -8),
-        ("correction_regularized", 3): (8, 12),
-        ("correction_regularized", 4): (8, -12),
-    }
-    return offsets.get((regime, rank), (8, 8))
 
 
 def scalar_sensitivity(
@@ -264,7 +227,17 @@ def scalar_sensitivity(
     order = list(CONSTRAINT_ORDER)
     x_lookup = {name: idx for idx, name in enumerate(order)}
     gnn = all_runs[all_runs["model_family"] == "gnn"].copy()
+    gnn = gnn[pd.to_numeric(gnn["selection_rank_within_regime"], errors="coerce") == 1].copy()
     pois = all_runs[all_runs["model_family"] == "poiseuille_baseline"].copy()
+    if not pois.empty:
+        pois["selection_category"] = [
+            classify_weighting_regime(
+                float(row["lambda_q"]),
+                float(row["lambda_k"]),
+                0.0,
+            )
+            for _, row in pois.iterrows()
+        ]
 
     gnn["selection_rank_within_regime"] = pd.to_numeric(
         gnn["selection_rank_within_regime"], errors="coerce"
@@ -292,20 +265,6 @@ def scalar_sensitivity(
             markeredgewidth=0.6,
             zorder=3,
         )
-        finite = np.isfinite(ys.to_numpy(dtype=float))
-        if finite.any():
-            last_idx = max(idx for idx, flag in enumerate(finite) if flag)
-            dx, dy = endpoint_offset(str(style["regime"]), int(style["rank"]))
-            ax.annotate(
-                str(style["label"]),
-                xy=(xs[last_idx], ys.iloc[last_idx]),
-                xytext=(dx, dy),
-                textcoords="offset points",
-                fontsize=9,
-                color=style["color"],
-                fontweight="bold",
-                zorder=5,
-            )
 
     for _, group_df in pois.groupby(["lambda_q", "lambda_k"]):
         group_df = group_df.sort_values(
@@ -314,17 +273,19 @@ def scalar_sensitivity(
         )
         xs = [x_lookup[name] for name in group_df["pressure_constraint_type"]]
         ys = pd.to_numeric(group_df[metric], errors="coerce")
+        regime = str(group_df["selection_category"].iloc[0]) if "selection_category" in group_df.columns else ""
+        color = REGIME_COLORS.get(regime, "#8a8a8a")
         ax.plot(
             xs,
             ys,
-            color="#8a8a8a",
-            alpha=0.42,
-            linewidth=1.4,
+            color=color,
+            alpha=0.65,
+            linewidth=1.6,
             linestyle="--",
             marker="D",
             markersize=4.5,
-            markerfacecolor="#b5b5b5",
-            markeredgecolor="#777777",
+            markerfacecolor=color,
+            markeredgecolor="#666666",
             markeredgewidth=0.5,
             zorder=1,
         )
@@ -409,7 +370,10 @@ def _bool_mask(df: pd.DataFrame, column: str) -> pd.Series:
 def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) -> None:
     gnn_runs = all_runs[all_runs["model_family"] == "gnn"].copy()
     for regime in REGIME_ORDER:
-        regime_df = gnn_runs[gnn_runs["selection_category"] == regime].copy()
+        regime_df = gnn_runs[
+            (gnn_runs["selection_category"] == regime)
+            & (pd.to_numeric(gnn_runs["selection_rank_within_regime"], errors="coerce") == 1)
+        ].copy()
         if regime_df.empty:
             continue
         labels = sorted(
@@ -439,9 +403,9 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
                 row = run_map[constraint]
                 nodes = node_df(Path(row["output_dir"]))
                 edges = edge_df(Path(row["output_dir"]))
-                aligned = aligned_pressure(nodes, row.get("gauge_node_id", ""))
-                panels[(rep_label, constraint)] = (nodes, edges, aligned)
-                finite_vals = aligned[np.isfinite(aligned)]
+                pressure = pd.to_numeric(nodes["pressure_pa"], errors="coerce")
+                panels[(rep_label, constraint)] = (nodes, edges, pressure)
+                finite_vals = pressure[np.isfinite(pressure)]
                 all_vals.extend(finite_vals.tolist())
                 coords = nodes[["x_px", "y_px"]].apply(pd.to_numeric, errors="coerce")
                 if not coords.empty:
@@ -452,8 +416,8 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
         if not all_vals:
             plt.close(fig)
             continue
-        vmin = float(np.min(all_vals))
-        vmax = float(np.max(all_vals))
+        vmin = float(np.nanpercentile(np.asarray(all_vals, dtype=float), 2.5))
+        vmax = float(np.nanpercentile(np.asarray(all_vals, dtype=float), 97.5))
         xlim = (min(xmins), max(xmaxs))
         ylim = (min(ymins), max(ymaxs))
         scatter = None
@@ -466,7 +430,7 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
                 if payload is None:
                     ax.axis("off")
                     continue
-                nodes, edges, aligned = payload
+                nodes, edges, pressure = payload
                 segments = transform_segment_collection(build_segments(nodes, edges), xlim, ylim)
                 if segments:
                     ax.add_collection(
@@ -476,8 +440,8 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
                 scatter = ax.scatter(
                     node_x,
                     node_y,
-                    c=aligned,
-                    cmap="coolwarm",
+                    c=pressure,
+                    cmap="viridis",
                     vmin=vmin,
                     vmax=vmax,
                     s=16,
@@ -518,11 +482,9 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
                     spine.set_visible(False)
                 if row_idx == 0:
                     ax.set_title(CONSTRAINT_DISPLAY[constraint], pad=8)
-                if col_idx == 0:
-                    ax.set_ylabel(rep_label, rotation=0, labelpad=22, va="center", ha="right", fontsize=11, fontweight="bold")
         if scatter is not None:
             cbar = fig.colorbar(scatter, ax=axes.ravel().tolist(), shrink=0.92, pad=0.02)
-            cbar.set_label("Aligned pressure (Pa)")
+            cbar.set_label("Pressure [Pa]")
         fig.suptitle(f"Pressure maps: {REGIME_LABELS[regime]}", fontsize=14)
         fig.savefig(output_dir / f"pressure_maps_{regime}.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
@@ -531,7 +493,10 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
 def correction_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) -> None:
     gnn_runs = all_runs[all_runs["model_family"] == "gnn"].copy()
     for regime in REGIME_ORDER:
-        regime_df = gnn_runs[gnn_runs["selection_category"] == regime].copy()
+        regime_df = gnn_runs[
+            (gnn_runs["selection_category"] == regime)
+            & (pd.to_numeric(gnn_runs["selection_rank_within_regime"], errors="coerce") == 1)
+        ].copy()
         if regime_df.empty:
             continue
         labels = sorted(
@@ -630,11 +595,9 @@ def correction_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int
                     spine.set_visible(False)
                 if row_idx == 0:
                     ax.set_title(CONSTRAINT_DISPLAY[constraint], pad=8)
-                if col_idx == 0:
-                    ax.set_ylabel(rep_label, rotation=0, labelpad=22, va="center", ha="right", fontsize=11, fontweight="bold")
         if collection is not None:
             cbar = fig.colorbar(collection, ax=axes.ravel().tolist(), shrink=0.92, pad=0.02)
-            cbar.set_label("delta_e")
+            cbar.set_label(r"$\delta_e$")
         fig.suptitle(f"Correction maps: {REGIME_LABELS[regime]}", fontsize=14)
         fig.savefig(output_dir / f"correction_maps_{regime}.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
@@ -643,7 +606,10 @@ def correction_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int
 def flow_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) -> None:
     gnn_runs = all_runs[all_runs["model_family"] == "gnn"].copy()
     for regime in REGIME_ORDER:
-        regime_df = gnn_runs[gnn_runs["selection_category"] == regime].copy()
+        regime_df = gnn_runs[
+            (gnn_runs["selection_category"] == regime)
+            & (pd.to_numeric(gnn_runs["selection_rank_within_regime"], errors="coerce") == 1)
+        ].copy()
         if regime_df.empty:
             continue
         labels = sorted(
@@ -756,8 +722,6 @@ def flow_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int
                     spine.set_visible(False)
                 if row_idx == 0:
                     ax.set_title(CONSTRAINT_DISPLAY[constraint], pad=8)
-                if col_idx == 0:
-                    ax.set_ylabel(rep_label, rotation=0, labelpad=22, va="center", ha="right", fontsize=11, fontweight="bold")
         if collection is not None:
             cbar = fig.colorbar(collection, ax=axes.ravel().tolist(), shrink=0.92, pad=0.02)
             cbar.set_label("Flow residual (nL/s)")
@@ -769,7 +733,10 @@ def flow_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int
 def kirchhoff_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) -> None:
     gnn_runs = all_runs[all_runs["model_family"] == "gnn"].copy()
     for regime in REGIME_ORDER:
-        regime_df = gnn_runs[gnn_runs["selection_category"] == regime].copy()
+        regime_df = gnn_runs[
+            (gnn_runs["selection_category"] == regime)
+            & (pd.to_numeric(gnn_runs["selection_rank_within_regime"], errors="coerce") == 1)
+        ].copy()
         if regime_df.empty:
             continue
         labels = sorted(
@@ -882,8 +849,6 @@ def kirchhoff_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi
                     spine.set_visible(False)
                 if row_idx == 0:
                     ax.set_title(CONSTRAINT_DISPLAY[constraint], pad=8)
-                if col_idx == 0:
-                    ax.set_ylabel(rep_label, rotation=0, labelpad=22, va="center", ha="right", fontsize=11, fontweight="bold")
         if scatter is not None:
             cbar = fig.colorbar(scatter, ax=axes.ravel().tolist(), shrink=0.92, pad=0.02)
             cbar.set_label("Kirchhoff residual (nL/s)")
@@ -1000,7 +965,7 @@ def main() -> None:
         correction_pairwise,
         "delta_pearson",
         output_dir / "correction_correlation_matrix_median.png",
-        "Median delta correlation",
+        r"Median $\delta_e$ correlation",
     )
     regime_matrix_heatmaps(
         pressure_gnn,
@@ -1015,7 +980,7 @@ def main() -> None:
         all_runs,
         "delta_pearson",
         "correction_correlation_matrix",
-        "Delta correlation",
+        r"$\delta_e$ correlation",
         output_dir,
     )
 

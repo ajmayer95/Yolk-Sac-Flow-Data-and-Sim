@@ -1,0 +1,7 @@
+representative_label,constraint_left,constraint_right,delta_pearson
+F1,equal_av,equal_drop,0.7748007265004035
+F1,equal_av,fixed_drop_10pa,0.3731677846125836
+F1,equal_av,gauge_only,0.6592033514100384
+F1,equal_drop,fixed_drop_10pa,0.2938570769576355
+F1,equal_drop,gauge_only,0.7344425617929708
+F1,fixed_drop_10pa,gauge_only,0.28311555245421954

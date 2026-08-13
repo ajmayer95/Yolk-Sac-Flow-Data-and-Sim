@@ -1,0 +1,2 @@
+run_name,model_family,lambda_q,lambda_k,lambda_b,lambda_delta,message_passing_layers,graph_path,device,require_cuda,seed,epochs,viscosity_pa_s,status,run_dir
+q_100__k_100__delta_100,gnn,100.0,100.0,100.0,100.0,2,/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/datasets/somite21_mosaic_cut_pipeline_ready.gpickle,cuda,True,0,100,0.0035,completed,/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs/somite21/dc/02_physics_weight_sweep/gnn/q_100__k_100__delta_100

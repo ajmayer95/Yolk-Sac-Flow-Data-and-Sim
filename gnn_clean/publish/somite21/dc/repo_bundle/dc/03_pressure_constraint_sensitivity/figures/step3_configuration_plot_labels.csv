@@ -1,0 +1,2 @@
+plot_label,run_name,selection_category,selection_rank_within_regime,lambda_q,lambda_k,lambda_delta,marker,regime_color_name
+F1,q_100__k_0p1__delta_0p1,flow_prioritized,1.0,100.0,0.1,0.1,o,Flow-prioritized

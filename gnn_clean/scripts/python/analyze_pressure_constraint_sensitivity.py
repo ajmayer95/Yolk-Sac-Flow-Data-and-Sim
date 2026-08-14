@@ -290,7 +290,17 @@ def write_df(df: pd.DataFrame, path: Path) -> None:
 def main() -> None:
     args = parse_args()
     input_root = args.input_root.expanduser().resolve()
+    if not input_root.exists():
+        raise FileNotFoundError(
+            f"Pressure-constraint sensitivity input root does not exist: {input_root}"
+        )
     all_runs, _ = build_run_rows(input_root)
+    if all_runs.empty:
+        raise FileNotFoundError(
+            "No pressure-constraint sensitivity runs were found under "
+            f"{input_root}. Expected at least one launcher metadata file "
+            "(launcher_run_config.yaml) from Step 03 solver outputs."
+        )
     gnn_runs = all_runs[all_runs["model_family"] == "gnn"].copy()
     poiseuille_runs = all_runs[all_runs["model_family"] == "poiseuille_baseline"].copy()
     pressure_pairwise = pairwise_pressure_metrics(all_runs)

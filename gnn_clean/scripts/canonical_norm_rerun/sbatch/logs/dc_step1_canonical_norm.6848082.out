@@ -1,0 +1,23 @@
+[run] lambda_b_0p1: /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/poiseuille_only_baseline.py /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/datasets/mosaic_graph_norm_canonical.gpickle --output-dir /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical_norm/dc/01_boundary_parameter_calibration --run-name lambda_b_0p1 --device cpu --viscosity-pa-s 0.0035 --dc-solve-mode reduced-soft-constrained-lstsq --arterial-flow-mode dataset --pressure-constraint equal-a-equal-v --lambda-kirchhoff 1.0 --lambda-pressure-constraints 0.1 --lambda-flow-residual 1.0
+[run] lambda_b_1: /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/poiseuille_only_baseline.py /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/datasets/mosaic_graph_norm_canonical.gpickle --output-dir /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical_norm/dc/01_boundary_parameter_calibration --run-name lambda_b_1 --device cpu --viscosity-pa-s 0.0035 --dc-solve-mode reduced-soft-constrained-lstsq --arterial-flow-mode dataset --pressure-constraint equal-a-equal-v --lambda-kirchhoff 1.0 --lambda-pressure-constraints 1.0 --lambda-flow-residual 1.0
+[run] lambda_b_10: /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/poiseuille_only_baseline.py /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/datasets/mosaic_graph_norm_canonical.gpickle --output-dir /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical_norm/dc/01_boundary_parameter_calibration --run-name lambda_b_10 --device cpu --viscosity-pa-s 0.0035 --dc-solve-mode reduced-soft-constrained-lstsq --arterial-flow-mode dataset --pressure-constraint equal-a-equal-v --lambda-kirchhoff 1.0 --lambda-pressure-constraints 10.0 --lambda-flow-residual 1.0
+[run] lambda_b_100: /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/poiseuille_only_baseline.py /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/datasets/mosaic_graph_norm_canonical.gpickle --output-dir /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical_norm/dc/01_boundary_parameter_calibration --run-name lambda_b_100 --device cpu --viscosity-pa-s 0.0035 --dc-solve-mode reduced-soft-constrained-lstsq --arterial-flow-mode dataset --pressure-constraint equal-a-equal-v --lambda-kirchhoff 1.0 --lambda-pressure-constraints 100.0 --lambda-flow-residual 1.0
+[ok] Combined summary written to /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical_norm/dc/01_boundary_parameter_calibration/boundary_weight_summary.csv
+[ok] Key columns:
+  - lambda_b
+  - flow_rmse_nl_s
+  - flow_mae_nl_s
+  - flow_nrmse_median
+  - kirchhoff_rms_per_internal_node_nl_s
+  - kirchhoff_mae_per_internal_node_nl_s
+  - kirchhoff_p95_abs_nl_s
+  - kirchhoff_max_abs_nl_s
+  - arterial_equality_residual_pa
+  - venous_equality_residual_pa
+  - boundary_residual_rms_pa
+  - boundary_residual_max_pa
+  - pressure_min_pa
+  - pressure_max_pa
+  - pressure_range_pa
+  - solver_success
+  - runtime_seconds

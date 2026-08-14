@@ -32,6 +32,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from analyze_physics_weight_sweep import compute_from_gnn_run, safe_float
 from utils import load_yaml, write_yaml
+from workflow_selection import resolve_dc_representative_row
 
 
 DEFAULT_STEP2_ROOT = PROJECT_ROOT / "outputs" / "dc" / "02_physics_weight_sweep"
@@ -48,9 +49,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graph", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--representative-labels", nargs="*", default=None)
+    parser.add_argument("--lambda-q", type=float, default=None)
+    parser.add_argument("--lambda-k", type=float, default=None)
+    parser.add_argument("--lambda-delta", type=float, default=None)
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--aggregate-only", action="store_true")
@@ -58,28 +63,47 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def select_best_balanced(rep_csv: Path) -> pd.Series:
-    df = pd.read_csv(rep_csv)
-    balanced = df[df["selection_category"] == "balanced"].copy()
-    if balanced.empty:
-        raise ValueError("No balanced configuration found in representative_configurations.csv")
-    if "selection_rank_within_regime" in balanced.columns:
-        balanced["selection_rank_within_regime"] = pd.to_numeric(
-            balanced["selection_rank_within_regime"], errors="coerce"
-        )
-        balanced = balanced.sort_values(
-            ["selection_rank_within_regime", "selection_score", "run_name"],
-            na_position="last",
-        )
-    elif "selection_score" in balanced.columns:
-        balanced = balanced.sort_values(["selection_score", "run_name"], na_position="last")
-    else:
-        balanced = balanced.sort_values(["run_name"])
-    return balanced.iloc[0]
+def default_step2_root_for_output(output_root: Path) -> Path:
+    return output_root.parent / "02_physics_weight_sweep"
 
 
-def select_representatives(rep_csv: Path, labels: list[str] | None) -> list[pd.Series]:
+def resolve_step2_inputs(output_root: Path, step2_root: Path, representative_csv: Path) -> tuple[Path, Path]:
+    default_step2 = DEFAULT_STEP2_ROOT.expanduser().resolve()
+    default_rep_csv = DEFAULT_REPRESENTATIVE_CSV.expanduser().resolve()
+    resolved_step2_root = step2_root.expanduser().resolve()
+    resolved_rep_csv = representative_csv.expanduser().resolve()
+    inferred_step2_root = default_step2_root_for_output(output_root)
+    if resolved_step2_root == default_step2:
+        resolved_step2_root = inferred_step2_root
+    if resolved_rep_csv == default_rep_csv:
+        candidate_rep_csv = resolved_step2_root / "representative_configurations.csv"
+        if candidate_rep_csv.exists():
+            resolved_rep_csv = candidate_rep_csv
+    return resolved_step2_root, resolved_rep_csv
+
+
+def select_representatives(
+    rep_csv: Path,
+    labels: list[str] | None,
+    lambda_q: float | None = None,
+    lambda_k: float | None = None,
+    lambda_delta: float | None = None,
+) -> list[pd.Series]:
     df = pd.read_csv(rep_csv)
+    explicit_lambda = any(value is not None for value in (lambda_q, lambda_k, lambda_delta))
+    if explicit_lambda:
+        resolved = resolve_dc_representative_row(
+            rep_csv,
+            lambda_q=lambda_q,
+            lambda_k=lambda_k,
+            lambda_delta=lambda_delta,
+        )
+        subset = df[df["run_name"].astype(str) == str(resolved.get("run_name", ""))].copy()
+        if subset.empty:
+            raise ValueError(
+                "Resolved Step 2 representative run is missing from the representative CSV."
+            )
+        return [subset.iloc[0]]
     if labels:
         selected: list[pd.Series] = []
         missing: list[str] = []
@@ -95,7 +119,13 @@ def select_representatives(rep_csv: Path, labels: list[str] | None) -> list[pd.S
                 + ", ".join(sorted(missing))
             )
         return selected
-    return [select_best_balanced(rep_csv)]
+    resolved = resolve_dc_representative_row(rep_csv)
+    subset = df[df["run_name"].astype(str) == str(resolved.get("run_name", ""))].copy()
+    if subset.empty:
+        raise ValueError(
+            "Balanced default Step 2 representative is missing from the representative CSV."
+        )
+    return [subset.iloc[0]]
 
 
 def selected_step2_config_path(step2_root: Path, run_name: str) -> Path:
@@ -151,6 +181,7 @@ def gnn_command(
         "solver_QKB_outer_QKBdelta",
         "--device",
         str(device),
+        "--require-cuda",
         "--epochs",
         str(int(epochs)),
         "--seed",
@@ -636,7 +667,7 @@ def plot_kirchhoff_residual_maps(run_dirs_by_k: dict[int, Path], path: Path) -> 
     plt.close(fig)
 
 
-def aggregate_and_plot(output_root: Path, selected_row: pd.Series, graph_path: Path) -> tuple[pd.DataFrame, dict[str, object]]:
+def aggregate_results(output_root: Path, selected_row: pd.Series, graph_path: Path) -> tuple[pd.DataFrame, dict[str, object]]:
     rows: list[dict[str, object]] = []
     run_dirs_by_k: dict[int, Path] = {}
     for K_value in K_VALUES:
@@ -672,24 +703,6 @@ def aggregate_and_plot(output_root: Path, selected_row: pd.Series, graph_path: P
     }
     write_yaml(output_root / "summary.yaml", summary_yaml)
 
-    plot_metric_vs_K(
-        summary_df,
-        "flow_rmse_nl_s",
-        "Flow RMSE (nL/s)",
-        "Flow agreement versus message-passing depth",
-        output_root / "flow_rmse_vs_K.png",
-    )
-    plot_metric_vs_K(
-        summary_df,
-        "kirchhoff_rms_per_internal_node_nl_s",
-        "Kirchhoff RMS per internal node (nL/s)",
-        "Conservation consistency versus message-passing depth",
-        output_root / "kirchhoff_rms_vs_K.png",
-    )
-    plot_pressure_maps(run_dirs_by_k, output_root / "pressure_maps_by_K.png")
-    plot_flow_residual_maps(run_dirs_by_k, output_root / "flow_residual_maps_by_K.png")
-    plot_kirchhoff_residual_maps(run_dirs_by_k, output_root / "kirchhoff_residual_maps_by_K.png")
-    plot_delta_maps(run_dirs_by_k, output_root / "conductance_correction_maps_by_K.png")
     return summary_df, summary_yaml
 
 
@@ -704,9 +717,24 @@ def main() -> None:
     args = parse_args()
     base_output_root = args.output_root.expanduser().resolve()
     base_output_root.mkdir(parents=True, exist_ok=True)
+    step2_root, representative_csv = resolve_step2_inputs(
+        base_output_root,
+        args.step2_root,
+        args.representative_csv,
+    )
+    if not representative_csv.exists():
+        raise FileNotFoundError(
+            "Missing Step 2 representative CSV. "
+            f"Looked for {representative_csv}. "
+            "Run Step 2 aggregation first, or pass --representative-csv explicitly. "
+            f"For this output root, the expected sibling Step 2 directory is {step2_root}."
+        )
     selected_rows = select_representatives(
-        args.representative_csv.expanduser().resolve(),
+        representative_csv,
         list(args.representative_labels) if args.representative_labels else None,
+        lambda_q=args.lambda_q,
+        lambda_k=args.lambda_k,
+        lambda_delta=args.lambda_delta,
     )
     multi = len(selected_rows) > 1
 
@@ -715,7 +743,7 @@ def main() -> None:
         output_root.mkdir(parents=True, exist_ok=True)
 
         step2_config_path = selected_step2_config_path(
-            args.step2_root.expanduser().resolve(),
+            step2_root,
             str(selected_row["run_name"]),
         )
         if not step2_config_path.exists():
@@ -724,7 +752,7 @@ def main() -> None:
             )
 
         if args.aggregate_only:
-            aggregate_and_plot(output_root, selected_row, args.graph)
+            aggregate_results(output_root, selected_row, args.graph)
             continue
 
         step2_config = load_yaml(step2_config_path)
@@ -756,7 +784,7 @@ def main() -> None:
                 cleanup_nonessential_outputs(run_dir)
 
         if not args.dry_run:
-            aggregate_and_plot(output_root, selected_row, args.graph)
+            aggregate_results(output_root, selected_row, args.graph)
 
 
 if __name__ == "__main__":

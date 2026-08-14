@@ -1,0 +1,6 @@
+[ok] Wrote /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/ac/03p5_sparse_distensibility_alpha_profiles_F1_B1_K1/H1/combined_results.csv
+[ok] Wrote /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/ac/03p5_sparse_distensibility_alpha_profiles_F1_B1_K1/H1/representative_configurations.csv
+[ok] Wrote /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/ac/03p5_sparse_distensibility_alpha_profiles_F1_B1_K1/H1/metric_minima.csv
+[ok] Wrote figures to /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/ac/03p5_sparse_distensibility_alpha_profiles_F1_B1_K1/H1/figures
+[post] /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/analyze_ac_distensibility_alpha_profiles.py --input-root /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/ac/03p5_sparse_distensibility_alpha_profiles_F1_B1_K1/H1
+[post] /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/plot_ac_distensibility_alpha_profiles.py --input-root /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/ac/03p5_sparse_distensibility_alpha_profiles_F1_B1_K1/H1

@@ -13,6 +13,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_F0_HZ = 2.749420195642236
+DEFAULT_ALPHA_VALUES = (0, 1, 2)
+DEFAULT_D0_VALUES = tuple(10.0 ** exponent for exponent in (-6, -5, -4, -3, -2, -1))
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,9 +25,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--representative-label", default="B1")
     parser.add_argument("--graph-path", type=Path, required=True)
     parser.add_argument("--f0-hz", type=float, default=DEFAULT_F0_HZ)
+    parser.add_argument(
+        "--arterial-boundary-mode",
+        choices=("all", "per_tip_highest_snr"),
+        default="all",
+    )
+    parser.add_argument(
+        "--venous-boundary-mode",
+        choices=("observed", "rebalance_to_sources"),
+        default="observed",
+    )
+    parser.add_argument("--alpha-values", type=int, nargs="*", default=None)
+    parser.add_argument("--d0-values", type=float, nargs="*", default=None)
+    parser.add_argument("--no-observed-flow-snr-weighting", action="store_true")
     parser.add_argument("--task-id", type=int, default=None)
     parser.add_argument("--python-bin", default="python")
     parser.add_argument("--conda-env", default=None)
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--lstsq-backend", choices=("numpy", "torch"), default="torch")
+    parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -48,7 +66,9 @@ def safe_float(value: object) -> float:
     return parsed if math.isfinite(parsed) else float("nan")
 
 
-def d0_values() -> list[float]:
+def d0_values(custom_values: list[float] | None = None) -> list[float]:
+    if custom_values:
+        return [float(value) for value in custom_values]
     return [10.0 ** (-6.0 + step / 10.0) for step in range(51)]
 
 
@@ -81,10 +101,10 @@ def select_representative(step2_root: Path, representative_label: str) -> dict[s
     return matches[0]
 
 
-def build_jobs() -> list[tuple[int, float]]:
+def build_jobs(alpha_values: list[int], d0_grid: list[float]) -> list[tuple[int, float]]:
     jobs: list[tuple[int, float]] = []
-    for alpha in (0, 1, 2):
-        for d0 in d0_values():
+    for alpha in alpha_values:
+        for d0 in d0_grid:
             jobs.append((alpha, d0))
     return jobs
 
@@ -108,10 +128,12 @@ def main() -> None:
     step2_root = args.step2_root.expanduser().resolve()
     output_root = args.output_root.expanduser().resolve()
     graph_path = args.graph_path.expanduser().resolve()
+    alpha_values = [int(value) for value in (args.alpha_values if args.alpha_values is not None else DEFAULT_ALPHA_VALUES)]
+    d0_grid = d0_values(args.d0_values)
 
     representative = select_representative(step2_root, args.representative_label)
     task_id = resolve_task_id(args.task_id)
-    jobs = build_jobs()
+    jobs = build_jobs(alpha_values, d0_grid)
     if task_id < 0 or task_id >= len(jobs):
         raise ValueError(f"Task id {task_id} is out of range for {len(jobs)} jobs.")
     alpha, d0 = jobs[task_id]
@@ -143,8 +165,14 @@ def main() -> None:
         str(representative["lambda_k"]),
         "--lambda-b",
         str(representative["lambda_b"]),
+        "--arterial-boundary-mode",
+        str(args.arterial_boundary_mode),
+        "--venous-boundary-mode",
+        str(args.venous_boundary_mode),
         "--lstsq-backend",
-        "numpy",
+        str(args.lstsq_backend),
+        "--device",
+        str(args.device),
         "--D0",
         f"{d0:.12g}",
         "--alpha",
@@ -153,6 +181,10 @@ def main() -> None:
         str(outdir),
         "--overwrite",
     ]
+    if bool(args.require_cuda):
+        cmd.append("--require-cuda")
+    if bool(args.no_observed_flow_snr_weighting):
+        cmd.append("--no-observed-flow-snr-weighting")
 
     print(
         f"[run] harmonic=H{args.harmonic_number} representative={args.representative_label} "

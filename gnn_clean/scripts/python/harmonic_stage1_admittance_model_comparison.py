@@ -65,6 +65,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--viscosity-pa-s", type=float, default=float(MU))
     parser.add_argument("--f0-hz", type=float, default=None)
     parser.add_argument("--boundary-amplitude-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--arterial-boundary-mode",
+        choices=("all", "per_tip_highest_snr"),
+        default="all",
+        help=(
+            "How to choose arterial boundary injections for the hard source term. "
+            "'all' uses every arterial boundary node. "
+            "'per_tip_highest_snr' keeps only one arterial node per arterial tip, "
+            "choosing the modeled node with the highest adjacent-edge SNR."
+        ),
+    )
+    parser.add_argument(
+        "--venous-boundary-mode",
+        choices=("observed", "rebalance_to_sources"),
+        default="observed",
+        help=(
+            "How to handle venous/sink harmonic injections. "
+            "'observed' uses the measured sink phasors directly. "
+            "'rebalance_to_sources' rescales the sink phasors together so the "
+            "net harmonic boundary injection is exactly zero while preserving "
+            "the selected arterial source phasors."
+        ),
+    )
     parser.add_argument("--phase-threshold-nl-s", type=float, default=None)
     parser.add_argument(
         "--pressure-solver-mode",
@@ -83,8 +106,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-phase-iterations", type=int, default=20)
     parser.add_argument("--phase-tol", type=float, default=2.0e-3)
     parser.add_argument("--lstsq-backend", choices=("numpy", "torch"), default="numpy")
+    parser.add_argument("--no-observed-flow-snr-weighting", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -110,7 +135,7 @@ def minimal_real_data_config(seed: int) -> dict[str, object]:
             "flow_normalization_reference_flux_nL_per_s": 1.0,
             "use_tilewise_flow_normalization": False,
         },
-        "physics": {},
+        "physics": {"use_observed_flow_snr_weighting": True},
     }
 
 
@@ -227,6 +252,203 @@ def summarize_distribution(values: np.ndarray) -> dict[str, float]:
     }
 
 
+def safe_json_value(value):
+    if isinstance(value, dict):
+        return {str(k): safe_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [safe_json_value(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return safe_json_value(value.tolist())
+    if isinstance(value, (np.floating, float)):
+        return float(value)
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, complex):
+        return {"real": float(np.real(value)), "imag": float(np.imag(value))}
+    return value
+
+
+def magnitude_triplet(values: np.ndarray, *, nonzero_only: bool = False) -> dict[str, float]:
+    mags = np.abs(np.asarray(values))
+    finite = mags[np.isfinite(mags)]
+    if nonzero_only:
+        finite = finite[finite > 0.0]
+    if finite.size == 0:
+        return {"min": float("nan"), "median": float("nan"), "max": float("nan")}
+    return {
+        "min": float(np.min(finite)),
+        "median": float(np.median(finite)),
+        "max": float(np.max(finite)),
+    }
+
+
+def complex_vector_rows(node_ids: np.ndarray, node_indices: np.ndarray, values: np.ndarray) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for idx in np.asarray(node_indices, dtype=np.int64):
+        z = complex(values[int(idx)])
+        rows.append(
+            {
+                "node_index": int(idx),
+                "node_id": str(node_ids[int(idx)]),
+                "abs_pa": float(np.abs(z)),
+                "phase_deg": float(np.angle(z) * DEG_PER_RAD),
+                "real_pa": float(np.real(z)),
+                "imag_pa": float(np.imag(z)),
+            }
+        )
+    return rows
+
+
+def write_pressure_diagnostics(
+    *,
+    path: Path,
+    data,
+    model_name: str,
+    harmonic_number: int,
+    q_obs_nl_s: np.ndarray,
+    valid_mask: np.ndarray,
+    pressure: np.ndarray,
+    solve: dict[str, object],
+    source_vector_nl_s: np.ndarray,
+    admittance_diag: np.ndarray,
+    admittance_off: np.ndarray,
+    arterial_idx: np.ndarray,
+    venous_idx: np.ndarray,
+    lambda_q: float,
+    lambda_k: float,
+    lambda_b: float,
+) -> None:
+    node_ids = np.asarray(data.node_id.tolist(), dtype=object)
+    laplacian = np.asarray(solve["laplacian_m3_s_per_pa"], dtype=np.complex128)
+    flow_matrix = np.asarray(solve["flow_matrix_m3_s_per_pa"], dtype=np.complex128)
+    source_vector_m3_s = np.asarray(solve["source_vector_m3_s"], dtype=np.complex128)
+    q_pred_m3_s = np.asarray(solve["flow_pred_m3_s"], dtype=np.complex128)
+    q_obs_m3_s = np.asarray(q_obs_nl_s, dtype=np.complex128) / NL_PER_M3
+    nodal_balance_m3_s = np.asarray(solve["nodal_balance_m3_s"], dtype=np.complex128)
+    nodal_residual_m3_s = np.asarray(solve["nodal_residual_m3_s"], dtype=np.complex128)
+    ls_info = dict(solve.get("lsqr_info", {}))
+    block_diag = dict(ls_info.get("block_diagnostics", {}))
+    laplacian_scale = float(ls_info.get("laplacian_scale", 1.0))
+    flow_scale = float(ls_info.get("flow_scale", 1.0))
+
+    valid_mask = np.asarray(valid_mask, dtype=bool)
+    flow_rows = np.flatnonzero(valid_mask)
+    q_resid_m3_s = q_pred_m3_s[flow_rows] - q_obs_m3_s[flow_rows]
+    r_k_raw = nodal_balance_m3_s - source_vector_m3_s
+    r_k_scaled = math.sqrt(lambda_k) * (r_k_raw / max(laplacian_scale, 1.0e-30))
+    r_q_scaled = math.sqrt(lambda_q) * (q_resid_m3_s / max(flow_scale, 1.0e-30))
+
+    phase_rows = np.zeros((0, 2 * len(pressure)), dtype=np.float64)
+    phase_rhs = np.zeros((0,), dtype=np.float64)
+    r_b_raw = np.zeros((0,), dtype=np.float64)
+    r_b_scaled = np.zeros((0,), dtype=np.float64)
+    if lambda_b > 0.0 and arterial_idx.size > 0:
+        from harmonic_utils import phase_only_constraint_rows  # local import for exact solve-time rows
+
+        phase_rows_t, phase_rhs_t, phase_phi, amp_floor = phase_only_constraint_rows(
+            pressures=pressure,
+            arterial_idx=arterial_idx,
+            num_nodes=len(pressure),
+            device=resolve_device("cpu"),
+        )
+        phase_rows = phase_rows_t.detach().cpu().numpy().astype(np.float64, copy=False)
+        phase_rhs = phase_rhs_t.detach().cpu().numpy().astype(np.float64, copy=False)
+        pressure_real = np.concatenate([np.real(pressure), np.imag(pressure)])
+        r_b_raw = phase_rows @ pressure_real - phase_rhs
+        r_b_scaled = math.sqrt(lambda_b) * r_b_raw
+    else:
+        phase_phi = float("nan")
+        amp_floor = float("nan")
+
+    top_idx = np.argsort(np.abs(pressure))[-10:][::-1]
+    optimal_offset = complex(np.mean(pressure))
+    shifted_pressure = pressure - optimal_offset
+    shifted_q_pred_m3_s = flow_matrix @ shifted_pressure
+    shifted_r_k_raw = laplacian @ shifted_pressure - source_vector_m3_s
+
+    diag = {
+        "model_name": model_name,
+        "harmonic_number": int(harmonic_number),
+        "admittance_scale": {
+            "abs_Ys": magnitude_triplet(admittance_diag),
+            "abs_Yt": magnitude_triplet(admittance_off),
+            "laplacian_nonzero_abs": magnitude_triplet(laplacian, nonzero_only=True),
+            "observed_H1_flow_amplitude_nl_s": magnitude_triplet(q_obs_nl_s[valid_mask]),
+            "pressure_scale_from_median_Q_over_median_Y_pa": (
+                float(np.median(np.abs(q_obs_m3_s[flow_rows]))) / max(magnitude_triplet(admittance_diag)["median"], 1.0e-30)
+                if flow_rows.size
+                else float("nan")
+            ),
+            "pressure_scale_from_max_Q_over_median_Y_pa": (
+                float(np.max(np.abs(q_obs_m3_s[flow_rows]))) / max(magnitude_triplet(admittance_diag)["median"], 1.0e-30)
+                if flow_rows.size
+                else float("nan")
+            ),
+            "pressure_scale_from_median_Q_over_min_laplacian_pa": (
+                float(np.median(np.abs(q_obs_m3_s[flow_rows]))) / max(magnitude_triplet(laplacian, nonzero_only=True)["min"], 1.0e-30)
+                if flow_rows.size
+                else float("nan")
+            ),
+            "pressure_scale_from_max_Q_over_min_laplacian_pa": (
+                float(np.max(np.abs(q_obs_m3_s[flow_rows]))) / max(magnitude_triplet(laplacian, nonzero_only=True)["min"], 1.0e-30)
+                if flow_rows.size
+                else float("nan")
+            ),
+        },
+        "objective_blocks": block_diag,
+        "final_real_matrix": {
+            "shape": ls_info.get("final_real_matrix_diagnostics", {}).get("shape", []),
+            "rank": ls_info.get("rank"),
+            "largest_singular_value": (
+                ls_info.get("largest_singular_values", [float("nan")])[0]
+                if ls_info.get("largest_singular_values")
+                else float("nan")
+            ),
+            "smallest_nonzero_singular_value": ls_info.get("smallest_nonzero_singular_value", float("nan")),
+            "condition_number": ls_info.get("acond", float("nan")),
+            "smallest_singular_values": ls_info.get("smallest_singular_values", []),
+            "largest_singular_values": ls_info.get("largest_singular_values", []),
+        },
+        "pressure_solution": {
+            "abs_pressure_pa": magnitude_triplet(pressure),
+            "top10_nodes": complex_vector_rows(node_ids, top_idx, pressure),
+            "arterial_anchor_pressures": complex_vector_rows(node_ids, arterial_idx, pressure),
+            "venous_boundary_pressures": complex_vector_rows(node_ids, venous_idx, pressure),
+        },
+        "residual_decomposition": {
+            "kirchhoff_raw_norm_m3_s": float(np.linalg.norm(r_k_raw)),
+            "kirchhoff_raw_rms_m3_s": float(complex_rmse(r_k_raw)),
+            "kirchhoff_scaled_norm": float(np.linalg.norm(r_k_scaled)),
+            "kirchhoff_scaled_rms": float(complex_rmse(r_k_scaled)),
+            "kirchhoff_max_abs_nl_s": float(np.max(np.abs(r_k_raw)) * NL_PER_M3) if r_k_raw.size else 0.0,
+            "edge_flow_raw_norm_m3_s": float(np.linalg.norm(q_resid_m3_s)),
+            "edge_flow_raw_rms_m3_s": float(complex_rmse(q_resid_m3_s)),
+            "edge_flow_scaled_norm": float(np.linalg.norm(r_q_scaled)),
+            "edge_flow_scaled_rms": float(complex_rmse(r_q_scaled)),
+            "edge_flow_max_abs_nl_s": float(np.max(np.abs(q_resid_m3_s)) * NL_PER_M3) if q_resid_m3_s.size else 0.0,
+            "arterial_phase_raw_norm": float(np.linalg.norm(r_b_raw)),
+            "arterial_phase_raw_rms": float(np.sqrt(np.mean(np.square(r_b_raw)))) if r_b_raw.size else 0.0,
+            "arterial_phase_scaled_norm": float(np.linalg.norm(r_b_scaled)),
+            "arterial_phase_scaled_rms": float(np.sqrt(np.mean(np.square(r_b_scaled)))) if r_b_scaled.size else 0.0,
+            "arterial_phase_common_phase_deg": float(phase_phi * DEG_PER_RAD) if np.isfinite(phase_phi) else float("nan"),
+            "arterial_phase_amplitude_floor_pa": float(amp_floor),
+        },
+        "nullspace_gauge": {
+            **dict(ls_info.get("nullspace_diagnostics", {})),
+            "optimal_constant_offset_real_pa": float(np.real(optimal_offset)),
+            "optimal_constant_offset_imag_pa": float(np.imag(optimal_offset)),
+            "shifted_abs_pressure_pa": magnitude_triplet(shifted_pressure),
+            "shifted_flow_change_norm_m3_s": float(np.linalg.norm(shifted_q_pred_m3_s - q_pred_m3_s)),
+            "shifted_kirchhoff_change_norm_m3_s": float(np.linalg.norm(shifted_r_k_raw - r_k_raw)),
+        },
+        "source_vector_abs_nl_s": magnitude_triplet(source_vector_nl_s),
+        "final_real_matrix_extra": dict(ls_info.get("final_real_matrix_diagnostics", {})),
+    }
+    path.write_text(json.dumps(safe_json_value(diag), indent=2), encoding="utf-8")
+
+
 def resolve_boundary_mappings(graph, node_ids: np.ndarray, node_index: dict[object, int]) -> list[dict[str, object]]:
     mappings: list[dict[str, object]] = []
     for boundary_node, node_data in graph.nodes(data=True):
@@ -255,10 +477,105 @@ def resolve_boundary_mappings(graph, node_ids: np.ndarray, node_index: dict[obje
                 "adjacent_graph_neighbor": neighbor,
                 "boundary_type": boundary_type,
                 "edge_data": graph.edges[boundary_node, neighbor],
+                "boundary_node_data": node_data,
             }
         )
     mappings.sort(key=lambda row: (0 if row["boundary_type"] == "source" else 1, str(row["boundary_node"])))
     return mappings
+
+
+def _finite_boundary_snr_values(edge_data: dict[str, object]) -> list[float]:
+    values: list[float] = []
+    for key in (
+        "snr_f0_piv",
+        "snr_harm_fit_db_piv",
+        "snr_ac_fit_db_piv",
+        "_h_total_snr",
+        "snr_pulse",
+        "snr_db",
+        "Q_DC_snr_db",
+        "mean_Q_snr_db",
+    ):
+        try:
+            value = float(edge_data.get(key))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            values.append(value)
+    return values
+
+
+def arterial_boundary_snr_score(graph, mapping: dict[str, object]) -> float:
+    modeled_node = mapping["modeled_node"]
+    best = float("-inf")
+    for neighbor in graph.neighbors(modeled_node):
+        if neighbor == mapping["boundary_node"]:
+            continue
+        edge_data = graph.edges[modeled_node, neighbor]
+        if edge_data.get("synthetic_boundary_edge"):
+            continue
+        for value in _finite_boundary_snr_values(edge_data):
+            best = max(best, float(value))
+    if math.isfinite(best):
+        return float(best)
+    boundary_edge = graph.edges[mapping["boundary_node"], mapping["adjacent_graph_neighbor"]]
+    boundary_values = _finite_boundary_snr_values(boundary_edge)
+    if boundary_values:
+        return float(max(boundary_values))
+    return float("-inf")
+
+
+def select_boundary_mappings(graph, mappings: list[dict[str, object]], arterial_boundary_mode: str) -> list[dict[str, object]]:
+    if str(arterial_boundary_mode) == "all":
+        return mappings
+
+    selected_sources: list[dict[str, object]] = []
+    sinks = [mapping for mapping in mappings if mapping["boundary_type"] == "sink"]
+    source_groups: dict[object, list[dict[str, object]]] = {}
+    ungrouped_sources: list[dict[str, object]] = []
+    for mapping in mappings:
+        if mapping["boundary_type"] != "source":
+            continue
+        boundary_node_data = mapping.get("boundary_node_data", {})
+        tip = boundary_node_data.get("cut_boundary_origin_tip")
+        if tip is None:
+            ungrouped_sources.append(mapping)
+            continue
+        source_groups.setdefault(tip, []).append(mapping)
+
+    for tip, group in sorted(source_groups.items(), key=lambda item: item[0]):
+        ranked = sorted(
+            group,
+            key=lambda mapping: (
+                arterial_boundary_snr_score(graph, mapping),
+                float(mapping.get("boundary_node_data", {}).get("cut_boundary_weight", float("-inf"))),
+                str(mapping["boundary_node"]),
+            ),
+            reverse=True,
+        )
+        selected_sources.append(ranked[0])
+
+    selected_sources.extend(ungrouped_sources)
+    selected = selected_sources + sinks
+    selected.sort(key=lambda row: (0 if row["boundary_type"] == "source" else 1, str(row["boundary_node"])))
+    return selected
+
+
+def phase_constraint_indices(
+    data,
+    active_mappings: list[dict[str, object]],
+    arterial_boundary_mode: str,
+) -> np.ndarray:
+    if str(arterial_boundary_mode) != "per_tip_highest_snr":
+        return data.arterial_node_indices.detach().cpu().numpy().astype(np.int64).flatten()
+    selected = sorted(
+        {
+            int(mapping["modeled_node_index"])
+            for mapping in active_mappings
+            if mapping["boundary_type"] == "source"
+        }
+    )
+    return np.asarray(selected, dtype=np.int64)
 
 
 def validate_boundary_mapping_edges(data, mappings: list[dict[str, object]]) -> None:
@@ -429,9 +746,11 @@ def build_boundary_injection_vector(
     harmonic_number: int,
     global_f0_hz: float,
     boundary_amplitude_scale: float,
+    venous_boundary_mode: str,
 ) -> tuple[np.ndarray, list[dict[str, object]]]:
     source_vector = np.zeros(int(num_nodes), dtype=np.complex128)
     rows: list[dict[str, object]] = []
+    raw_entries: list[dict[str, object]] = []
     for mapping in mappings:
         boundary_node = mapping["boundary_node"]
         modeled_node = mapping["modeled_node"]
@@ -449,7 +768,47 @@ def build_boundary_injection_vector(
             raise ValueError(
                 f"Boundary edge {(boundary_node, adjacent_node)} does not have a valid H{harmonic_number} phasor."
             )
-        used_phasor = complex(float(boundary_amplitude_scale) * observed_phasor_nl_s)
+        raw_entries.append(
+            {
+                "mapping": mapping,
+                "boundary_node": boundary_node,
+                "modeled_node": modeled_node,
+                "modeled_node_index": modeled_idx,
+                "adjacent_node": adjacent_node,
+                "boundary_type": str(mapping["boundary_type"]),
+                "observed_phasor_nl_s": complex(float(boundary_amplitude_scale) * observed_phasor_nl_s),
+                "raw_observed_phasor_nl_s": complex(observed_phasor_nl_s),
+            }
+        )
+
+    source_total = sum(
+        entry["observed_phasor_nl_s"]
+        for entry in raw_entries
+        if entry["boundary_type"] == "source"
+    )
+    sink_total = sum(
+        entry["observed_phasor_nl_s"]
+        for entry in raw_entries
+        if entry["boundary_type"] == "sink"
+    )
+    sink_scale = 1.0 + 0.0j
+    if str(venous_boundary_mode) == "rebalance_to_sources" and raw_entries:
+        if abs(sink_total) > 0.0:
+            sink_scale = complex(-source_total / sink_total)
+        elif abs(source_total) > 0.0:
+            raise ValueError(
+                "Cannot rebalance venous boundary injections because the selected sink phasors sum to zero."
+            )
+
+    for entry in raw_entries:
+        used_phasor = complex(entry["observed_phasor_nl_s"])
+        if entry["boundary_type"] == "sink":
+            used_phasor *= sink_scale
+        mapping = entry["mapping"]
+        boundary_node = entry["boundary_node"]
+        modeled_node = entry["modeled_node"]
+        modeled_idx = int(entry["modeled_node_index"])
+        adjacent_node = entry["adjacent_node"]
         source_vector[modeled_idx] += used_phasor
         rows.append(
             {
@@ -460,10 +819,13 @@ def build_boundary_injection_vector(
                 "modeled_node_index": modeled_idx,
                 "boundary_type": str(mapping["boundary_type"]),
                 "boundary_amplitude_scale": float(boundary_amplitude_scale),
-                "observed_boundary_real_nl_s": float(np.real(observed_phasor_nl_s)),
-                "observed_boundary_imag_nl_s": float(np.imag(observed_phasor_nl_s)),
-                "observed_boundary_amplitude_nl_s": float(abs(observed_phasor_nl_s)),
-                "observed_boundary_phase_deg": float(np.angle(observed_phasor_nl_s) * DEG_PER_RAD),
+                "venous_boundary_mode": str(venous_boundary_mode),
+                "venous_sink_scale_real": float(np.real(sink_scale)),
+                "venous_sink_scale_imag": float(np.imag(sink_scale)),
+                "observed_boundary_real_nl_s": float(np.real(entry["observed_phasor_nl_s"])),
+                "observed_boundary_imag_nl_s": float(np.imag(entry["observed_phasor_nl_s"])),
+                "observed_boundary_amplitude_nl_s": float(abs(entry["observed_phasor_nl_s"])),
+                "observed_boundary_phase_deg": float(np.angle(entry["observed_phasor_nl_s"]) * DEG_PER_RAD),
                 "used_boundary_real_nl_s": float(np.real(used_phasor)),
                 "used_boundary_imag_nl_s": float(np.imag(used_phasor)),
                 "used_boundary_amplitude_nl_s": float(abs(used_phasor)),
@@ -702,7 +1064,7 @@ def solve_one_model(
             edge_index=data.edge_index.detach().cpu().numpy().astype(np.int64),
             source_vector_m3_s=source_vector_m3_s,
             reference_node=int(data.reference_node),
-            device=resolve_device(args.device),
+            device=resolve_device(args.device, require_cuda=bool(args.require_cuda)),
         )
     else:
         if float(args.lambda_q) > 0.0:
@@ -712,6 +1074,11 @@ def solve_one_model(
                 edge_index=data.edge_index.detach().cpu().numpy().astype(np.int64),
                 q_obs_m3_s=np.asarray(q_obs_nl_s, dtype=np.complex128) / NL_PER_M3,
                 valid_edge_mask=np.asarray(valid_mask, dtype=bool),
+                flow_row_weights=(
+                    None
+                    if bool(args.no_observed_flow_snr_weighting)
+                    else data.observed_flow_weight.detach().cpu().numpy().astype(np.float64)
+                ),
                 source_vector_m3_s=source_vector_m3_s,
                 arterial_idx=arterial_idx,
                 lambda_q=float(args.lambda_q),
@@ -721,7 +1088,7 @@ def solve_one_model(
                 phase_offset=float(args.phase_offset),
                 max_iterations=int(args.max_phase_iterations),
                 tol=float(args.phase_tol),
-                device=resolve_device(args.device),
+                device=resolve_device(args.device, require_cuda=bool(args.require_cuda)),
                 lstsq_backend=str(args.lstsq_backend),
             )
         else:
@@ -737,7 +1104,7 @@ def solve_one_model(
                 phase_offset=float(args.phase_offset),
                 max_iterations=int(args.max_phase_iterations),
                 tol=float(args.phase_tol),
-                device=resolve_device(args.device),
+                device=resolve_device(args.device, require_cuda=bool(args.require_cuda)),
                 lstsq_backend=str(args.lstsq_backend),
             )
     runtime = time.perf_counter() - start
@@ -747,11 +1114,35 @@ def solve_one_model(
     nodal_residual_m3_s = np.asarray(solve["nodal_residual_m3_s"], dtype=np.complex128)
     q_pred_nl_s = q_pred_m3_s * NL_PER_M3
     nodal_residual_nl_s = nodal_residual_m3_s * NL_PER_M3
+    diagnostics_path = model_dir / "pressure_diagnostics.json"
+    write_pressure_diagnostics(
+        path=diagnostics_path,
+        data=data,
+        model_name=model_name,
+        harmonic_number=harmonic_number,
+        q_obs_nl_s=q_obs_nl_s,
+        valid_mask=valid_mask,
+        pressure=pressure,
+        solve=solve,
+        source_vector_nl_s=source_vector_nl_s,
+        admittance_diag=admittance_diag,
+        admittance_off=admittance_off,
+        arterial_idx=arterial_idx,
+        venous_idx=venous_idx,
+        lambda_q=float(args.lambda_q),
+        lambda_k=float(args.lambda_k),
+        lambda_b=float(args.lambda_b),
+    )
     if not np.allclose(q_pred_nl_s / NL_PER_M3, q_pred_m3_s, rtol=1.0e-12, atol=1.0e-18):
         raise RuntimeError(f"{model_name} flow conversion check failed.")
     if not np.all(np.isfinite(np.abs(pressure))):
         raise RuntimeError(f"{model_name} returned non-finite pressure amplitudes.")
     if float(np.nanmax(np.abs(pressure))) > 1.0e10:
+        print(
+            f"[diag] wrote pressure diagnostics to {diagnostics_path} "
+            f"(max |P|={float(np.nanmax(np.abs(pressure))):.6g} Pa)",
+            flush=True,
+        )
         raise RuntimeError(f"{model_name} pressure amplitudes remain implausibly large; check unit conversion.")
     arterial_pressures = pressure[arterial_idx]
     boundary_phase_rows = np.asarray(solve["boundary_phase_target_residual_deg"], dtype=np.float64)
@@ -1190,7 +1581,9 @@ def main() -> None:
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     graph = load_graph(graph_path)
-    data = build_real_gnn_data(graph_path, minimal_real_data_config(int(args.seed)))
+    data_config = minimal_real_data_config(int(args.seed))
+    data_config["physics"]["use_observed_flow_snr_weighting"] = not bool(args.no_observed_flow_snr_weighting)
+    data = build_real_gnn_data(graph_path, data_config)
     node_ids = np.asarray(data.node_id.tolist(), dtype=object)
     node_index = {node: idx for idx, node in enumerate(node_ids)}
     positions = graph_positions(graph)
@@ -1213,8 +1606,19 @@ def main() -> None:
 
     mappings = resolve_boundary_mappings(graph, node_ids, node_index)
     validate_boundary_mapping_edges(data, mappings)
-    arterial_idx = data.arterial_node_indices.detach().cpu().numpy().astype(np.int64).flatten()
+    active_mappings = select_boundary_mappings(
+        graph,
+        mappings,
+        arterial_boundary_mode=str(args.arterial_boundary_mode),
+    )
+    arterial_idx = phase_constraint_indices(
+        data,
+        active_mappings,
+        arterial_boundary_mode=str(args.arterial_boundary_mode),
+    )
     venous_idx = data.venous_node_indices.detach().cpu().numpy().astype(np.int64).flatten()
+    arterial_boundary_count_total = sum(1 for mapping in mappings if mapping["boundary_type"] == "source")
+    arterial_boundary_count_active = sum(1 for mapping in active_mappings if mapping["boundary_type"] == "source")
 
     harmonic_numbers = requested_harmonic_numbers(args)
     multi_harmonic = len(harmonic_numbers) > 1
@@ -1236,11 +1640,12 @@ def main() -> None:
         validate_edge_frequencies(edge_f0_hz, valid_mask)
         omega_n = omega0 * int(harmonic_number)
         source_vector_nl_s, boundary_rows = build_boundary_injection_vector(
-            mappings=mappings,
+            mappings=active_mappings,
             num_nodes=len(data.node_id),
             harmonic_number=int(harmonic_number),
             global_f0_hz=global_f0_hz,
             boundary_amplitude_scale=float(args.boundary_amplitude_scale),
+            venous_boundary_mode=str(args.venous_boundary_mode),
         )
         all_boundary_rows.extend(boundary_rows)
         phase_threshold_nl_s = phase_eval_threshold(valid_mask, q_obs_nl_s, args.phase_threshold_nl_s)
@@ -1297,13 +1702,25 @@ def main() -> None:
                     "alpha": float(args.alpha),
                     "viscosity_pa_s": float(args.viscosity_pa_s),
                     "boundary_amplitude_scale": float(args.boundary_amplitude_scale),
+                    "arterial_boundary_mode": str(args.arterial_boundary_mode),
+                    "venous_boundary_mode": str(args.venous_boundary_mode),
                     "pressure_solver_mode": str(args.pressure_solver_mode),
                     "lambda_q": float(args.lambda_q),
                     "lambda_k": float(args.lambda_k),
                     "lambda_b": float(args.lambda_b),
+                    "use_observed_flow_snr_weighting": not bool(args.no_observed_flow_snr_weighting),
                     "lstsq_backend": str(args.lstsq_backend) if str(args.pressure_solver_mode) == "constrained_least_squares" else "",
                     "n_nodes": int(len(data.node_id)),
                     "n_edges": int(len(data.edge_ids)),
+                    "boundary_mapping_count_total": int(len(mappings)),
+                    "boundary_mapping_count_active": int(len(active_mappings)),
+                    "arterial_boundary_count_total": int(arterial_boundary_count_total),
+                    "arterial_boundary_count_active": int(arterial_boundary_count_active),
+                    "phase_constraint_node_count": int(len(arterial_idx)),
+                    **{
+                        key: value
+                        for key, value in data.observed_flow_weight_stats.items()
+                    },
                     **{
                         k: v
                         for k, v in result.items()
@@ -1400,8 +1817,13 @@ def main() -> None:
             "lambda_q": float(args.lambda_q),
             "lambda_k": float(args.lambda_k),
             "lambda_b": float(args.lambda_b),
+            "use_observed_flow_snr_weighting": not bool(args.no_observed_flow_snr_weighting),
             "lstsq_backend": str(args.lstsq_backend) if str(args.pressure_solver_mode) == "constrained_least_squares" else "",
             "reference_radius_m": float(reference_radius_m),
+            **{
+                key: value
+                for key, value in data.observed_flow_weight_stats.items()
+            },
         },
     )
 

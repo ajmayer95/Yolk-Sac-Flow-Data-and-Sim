@@ -323,18 +323,11 @@ def transform_mosaic_coords(
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Rotate 90 degrees clockwise, then mirror across the vertical axis.
-
-    The transform is applied within the shared mosaic bounds so the subplot grid,
-    titles, labels, and colorbars stay unchanged while each map panel is reoriented.
-    """
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    x_min, x_max = x_bounds
-    y_min, y_max = y_bounds
-    transformed_x = y_max - y_arr
-    transformed_y = x_max - x_arr
-    return transformed_x, transformed_y
+    x_min, _ = x_bounds
+    y_min, _ = y_bounds
+    return x_arr - x_min, y_arr - y_min
 
 
 def transform_segment_collection(
@@ -421,8 +414,8 @@ def pressure_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int) 
         xlim = (min(xmins), max(xmaxs))
         ylim = (min(ymins), max(ymaxs))
         scatter = None
-        transformed_xlim = (0.0, ylim[1] - ylim[0])
-        transformed_ylim = (0.0, xlim[1] - xlim[0])
+        transformed_xlim = (0.0, xlim[1] - xlim[0])
+        transformed_ylim = (0.0, ylim[1] - ylim[0])
         for row_idx, rep_label in enumerate(labels):
             for col_idx, constraint in enumerate(CONSTRAINT_ORDER):
                 ax = axes[row_idx, col_idx]
@@ -534,8 +527,8 @@ def correction_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int
                     ymaxs.append(coords["y_px"].max())
         xlim = (min(xmins), max(xmaxs))
         ylim = (min(ymins), max(ymaxs))
-        transformed_xlim = (0.0, ylim[1] - ylim[0])
-        transformed_ylim = (0.0, xlim[1] - xlim[0])
+        transformed_xlim = (0.0, xlim[1] - xlim[0])
+        transformed_ylim = (0.0, ylim[1] - ylim[0])
         collection = None
         for row_idx, rep_label in enumerate(labels):
             for col_idx, constraint in enumerate(CONSTRAINT_ORDER):
@@ -660,8 +653,8 @@ def flow_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi: int
         vmin, vmax = limits
         xlim = (min(xmins), max(xmaxs))
         ylim = (min(ymins), max(ymaxs))
-        transformed_xlim = (0.0, ylim[1] - ylim[0])
-        transformed_ylim = (0.0, xlim[1] - xlim[0])
+        transformed_xlim = (0.0, xlim[1] - xlim[0])
+        transformed_ylim = (0.0, ylim[1] - ylim[0])
         collection = None
         for row_idx, rep_label in enumerate(labels):
             for col_idx, constraint in enumerate(CONSTRAINT_ORDER):
@@ -787,8 +780,8 @@ def kirchhoff_error_maps_by_regime(all_runs: pd.DataFrame, output_dir: Path, dpi
         vmin, vmax = limits
         xlim = (min(xmins), max(xmaxs))
         ylim = (min(ymins), max(ymaxs))
-        transformed_xlim = (0.0, ylim[1] - ylim[0])
-        transformed_ylim = (0.0, xlim[1] - xlim[0])
+        transformed_xlim = (0.0, xlim[1] - xlim[0])
+        transformed_ylim = (0.0, ylim[1] - ylim[0])
         scatter = None
         for row_idx, rep_label in enumerate(labels):
             for col_idx, constraint in enumerate(CONSTRAINT_ORDER):

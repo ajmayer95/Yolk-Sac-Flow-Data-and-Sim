@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--viscosity-pa-s", type=float, default=3.5e-3)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--base-config", type=Path, default=None)
@@ -138,6 +139,7 @@ def gnn_command(
         "solver_QKB_outer_QKBdelta",
         "--device",
         str(args.device),
+        "--require-cuda",
         "--epochs",
         str(int(args.epochs)),
         "--seed",
@@ -250,6 +252,7 @@ def main() -> None:
             **run_cfg,
             "graph_path": str(graph),
             "device": args.device if model_family == "gnn" else "cpu",
+            "require_cuda": bool(args.require_cuda) if model_family == "gnn" else False,
             "seed": int(args.seed),
             "epochs": int(args.epochs),
             "viscosity_pa_s": float(args.viscosity_pa_s),

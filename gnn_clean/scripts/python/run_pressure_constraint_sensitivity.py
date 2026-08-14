@@ -30,6 +30,7 @@ from pressure_constraint_sensitivity_lib import (
     representative_label,
 )
 from utils import load_yaml, write_yaml
+from workflow_selection import resolve_dc_representative_row
 
 
 GNN_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "gnn_flow.py"
@@ -45,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--viscosity-pa-s", type=float, default=3.5e-3)
     parser.add_argument("--base-config", type=Path, default=None)
@@ -55,9 +57,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=("both", "gnn", "poiseuille"), default="both")
     parser.add_argument("--constraints", nargs="*", choices=CONSTRAINT_ORDER, default=None)
     parser.add_argument("--representative-labels", nargs="*", default=None)
+    parser.add_argument("--lambda-q", type=float, default=None)
+    parser.add_argument("--lambda-k", type=float, default=None)
+    parser.add_argument("--lambda-delta", type=float, default=None)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
     return parser.parse_args()
+
+
+def default_step2_root_for_output(output_root: Path) -> Path:
+    return output_root.parent / "02_physics_weight_sweep"
+
+
+def resolve_step2_inputs(
+    output_root: Path,
+    representative_csv: Path,
+    representative_labels_csv: Path | None,
+) -> tuple[Path, Path | None]:
+    default_rep_csv = DEFAULT_REPRESENTATIVE_CSV.expanduser().resolve()
+    resolved_rep_csv = representative_csv.expanduser().resolve()
+    resolved_labels_csv = (
+        representative_labels_csv.expanduser().resolve()
+        if representative_labels_csv is not None
+        else None
+    )
+    if resolved_rep_csv == default_rep_csv:
+        inferred_step2_root = default_step2_root_for_output(output_root)
+        inferred_rep_csv = inferred_step2_root / "representative_configurations.csv"
+        if inferred_rep_csv.exists():
+            resolved_rep_csv = inferred_rep_csv
+            if resolved_labels_csv is None or resolved_labels_csv == DEFAULT_REPRESENTATIVE_LABELS_CSV.expanduser().resolve():
+                inferred_labels_csv = inferred_step2_root / "figures" / "representative_plot_labels.csv"
+                resolved_labels_csv = inferred_labels_csv
+    return resolved_rep_csv, resolved_labels_csv
 
 
 def read_representatives(rep_csv: Path, labels_csv: Path | None) -> pd.DataFrame:
@@ -92,6 +124,44 @@ def read_representatives(rep_csv: Path, labels_csv: Path | None) -> pd.DataFrame
     )
     reps = reps.drop_duplicates(subset=["run_name"]).copy()
     return reps
+
+
+def select_representatives(args: argparse.Namespace, reps: pd.DataFrame) -> pd.DataFrame:
+    explicit_lambda = any(
+        value is not None for value in (args.lambda_q, args.lambda_k, args.lambda_delta)
+    )
+    if explicit_lambda:
+        row = resolve_dc_representative_row(
+            args.representative_csv,
+            lambda_q=args.lambda_q,
+            lambda_k=args.lambda_k,
+            lambda_delta=args.lambda_delta,
+        )
+        selected = reps[reps["run_name"].astype(str) == str(row.get("run_name", ""))].copy()
+        if selected.empty:
+            raise ValueError(
+                "Resolved Step 2 representative run is missing from the loaded representative table."
+            )
+        return selected
+
+    if args.representative_labels:
+        requested = set(args.representative_labels)
+        selected = reps[reps["plot_label"].astype(str).isin(requested)].copy()
+        missing = sorted(requested - set(selected["plot_label"].astype(str)))
+        if missing:
+            raise ValueError(
+                "Representative labels not found in representative_configurations.csv: "
+                + ", ".join(missing)
+            )
+        return selected
+
+    default_row = resolve_dc_representative_row(args.representative_csv)
+    selected = reps[reps["run_name"].astype(str) == str(default_row.get("run_name", ""))].copy()
+    if selected.empty:
+        raise ValueError(
+            "Balanced default Step 2 representative is missing from the loaded representative table."
+        )
+    return selected
 
 
 def build_gnn_override(base_config: dict, rep_row: pd.Series, constraint_type: str, args: argparse.Namespace) -> dict:
@@ -161,6 +231,7 @@ def gnn_command(
         "solver_QKB_outer_QKBdelta",
         "--device",
         str(args.device),
+        "--require-cuda",
         "--epochs",
         str(int(args.epochs)),
         "--seed",
@@ -222,9 +293,6 @@ def run_is_complete(run_dir: Path) -> bool:
 
 def build_run_manifest(args: argparse.Namespace, reps: pd.DataFrame) -> list[dict[str, object]]:
     constraints = list(args.constraints) if args.constraints else list(CONSTRAINT_ORDER)
-    if args.representative_labels:
-        requested = set(args.representative_labels)
-        reps = reps[reps["plot_label"].astype(str).isin(requested)].copy()
 
     rows: list[dict[str, object]] = []
     if args.mode in {"both", "gnn"}:
@@ -285,12 +353,24 @@ def main() -> None:
 
     output_root = args.output_root.expanduser().resolve()
     graph = args.graph.expanduser().resolve()
-    reps = read_representatives(
-        args.representative_csv.expanduser().resolve(),
-        args.representative_labels_csv.expanduser().resolve()
-        if args.representative_labels_csv is not None
-        else None,
+    representative_csv, representative_labels_csv = resolve_step2_inputs(
+        output_root,
+        args.representative_csv,
+        args.representative_labels_csv,
     )
+    if not representative_csv.exists():
+        inferred_step2_root = default_step2_root_for_output(output_root)
+        raise FileNotFoundError(
+            "Missing Step 2 representative CSV. "
+            f"Looked for {representative_csv}. "
+            "Run Step 2 aggregation first, or pass --representative-csv explicitly. "
+            f"For this output root, the expected sibling Step 2 directory is {inferred_step2_root}."
+        )
+    reps = read_representatives(
+        representative_csv,
+        representative_labels_csv,
+    )
+    reps = select_representatives(args, reps)
 
     if args.aggregate_only:
         cmd = [
@@ -326,6 +406,7 @@ def main() -> None:
             **row,
             "graph_path": str(graph),
             "device": args.device if model_family == "gnn" else "cpu",
+            "require_cuda": bool(args.require_cuda) if model_family == "gnn" else False,
             "seed": int(args.seed),
             "epochs": int(args.epochs),
             "viscosity_pa_s": float(args.viscosity_pa_s),

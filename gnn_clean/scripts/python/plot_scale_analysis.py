@@ -99,11 +99,9 @@ def transform_mosaic_coords(
 ) -> tuple[np.ndarray, np.ndarray]:
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    x_min, x_max = x_bounds
-    y_min, y_max = y_bounds
-    transformed_x = y_max - y_arr
-    transformed_y = x_max - x_arr
-    return transformed_x, transformed_y
+    x_min, _ = x_bounds
+    y_min, _ = y_bounds
+    return x_arr - x_min, y_arr - y_min
 
 
 def transform_segments(
@@ -287,8 +285,8 @@ def draw_node_panel(
         ax.scatter(*transform_mosaic_coords(arterial["x_px"], arterial["y_px"], xlim, ylim), marker="^", color="black", s=10, zorder=3)
     if not venous.empty:
         ax.scatter(*transform_mosaic_coords(venous["x_px"], venous["y_px"], xlim, ylim), marker="s", color="black", s=9, zorder=3)
-    ax.set_xlim((0.0, ylim[1] - ylim[0]))
-    ax.set_ylim((0.0, xlim[1] - xlim[0]))
+    ax.set_xlim((0.0, xlim[1] - xlim[0]))
+    ax.set_ylim((0.0, ylim[1] - ylim[0]))
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
@@ -337,8 +335,8 @@ def draw_edge_panel(
         ax.scatter(*transform_mosaic_coords(arterial["x_px"], arterial["y_px"], xlim, ylim), marker="^", color="black", s=10, zorder=3)
     if not venous.empty:
         ax.scatter(*transform_mosaic_coords(venous["x_px"], venous["y_px"], xlim, ylim), marker="s", color="black", s=9, zorder=3)
-    ax.set_xlim((0.0, ylim[1] - ylim[0]))
-    ax.set_ylim((0.0, xlim[1] - xlim[0]))
+    ax.set_xlim((0.0, xlim[1] - xlim[0]))
+    ax.set_ylim((0.0, ylim[1] - ylim[0]))
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])

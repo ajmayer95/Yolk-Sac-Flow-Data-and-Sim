@@ -2,3 +2,10 @@ outputs/
 outputs_old/
 datasets/
 publish/**/release_bundle/**/*.tar.gz
+# Python cache files
+__pycache__/
+*.pyc
+
+# Local logs
+logs/
+*.out

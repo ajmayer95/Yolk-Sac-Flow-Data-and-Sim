@@ -136,19 +136,20 @@ def validate_and_print_representatives(representatives: list[dict[str, object]])
         if not subset:
             continue
         subset.sort(key=lambda row: safe_float(row["selection_rank_within_regime"]))
-        previous_score = -float("inf")
+        previous_sort_key: tuple[float, float, float, float, str] | None = None
         for expected_rank, row in enumerate(subset, start=1):
             actual_rank = int(safe_float(row["selection_rank_within_regime"]))
             if actual_rank != expected_rank:
                 raise AssertionError(
                     f"{regime}: expected consecutive ranks 1..N, got rank {actual_rank} at position {expected_rank}"
                 )
-            score = safe_float(row["selection_score"])
-            if math.isfinite(previous_score) and score < previous_score - 1.0e-12:
+            sort_key = representative_sort_key(row)
+            if previous_sort_key is not None and sort_key < previous_sort_key:
                 raise AssertionError(
-                    f"{regime}: selection scores are not monotonic with rank ({score} < {previous_score})"
+                    f"{regime}: representative sort keys are not monotonic with rank "
+                    f"({sort_key!r} < {previous_sort_key!r})"
                 )
-            previous_score = score
+            previous_sort_key = sort_key
         print(f"{regime}:")
         for row in subset:
             print(
@@ -463,21 +464,7 @@ def analyze_rows(rows: list[dict[str, object]]) -> tuple[list[dict[str, object]]
             )
             row["selection_score_formula"] = REGIME_SCORE_FORMULAS[regime]
             row["selection_score_regime"] = regime
-        if regime == "correction_regularized":
-            candidates.sort(
-                key=lambda row: (
-                    safe_float(row.get("selection_score")),
-                    safe_float(row.get("delta_rms")),
-                    str(row.get("run_name", "")),
-                )
-            )
-        else:
-            candidates.sort(
-                key=lambda row: (
-                    safe_float(row.get("selection_score")),
-                    str(row.get("run_name", "")),
-                )
-            )
+        candidates.sort(key=representative_sort_key)
         for rank_index, row in enumerate(candidates[:4], start=1):
             row["selected_representative"] = True
             row["selection_rank_within_regime"] = rank_index

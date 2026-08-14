@@ -100,7 +100,7 @@ def main() -> None:
     ax.add_collection(collection)
 
     ax.set_xlim(float(np.nanmin(x_values)), float(np.nanmax(x_values)))
-    ax.set_ylim(float(np.nanmax(y_values)), float(np.nanmin(y_values)))
+    ax.set_ylim(float(np.nanmin(y_values)), float(np.nanmax(y_values)))
     ax.set_aspect("equal", adjustable="box")
     ax.set_xticks([])
     ax.set_yticks([])

@@ -50,6 +50,23 @@ def require_path(path: Path, description: str) -> Path:
     return path
 
 
+def resolve_step_output_dir(outputs_root: Path, step_name: str) -> Path | None:
+    exact = outputs_root / step_name
+    if exact.exists():
+        return exact
+    matches = sorted(
+        path for path in outputs_root.glob(f"{step_name}*") if path.is_dir()
+    )
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    raise ValueError(
+        f"Multiple candidate directories found for {step_name} under {outputs_root}: "
+        + ", ".join(str(path.name) for path in matches)
+    )
+
+
 def maybe_copy_spec(path: Path, destination_relative: str, description: str) -> CopySpec | None:
     return CopySpec(path, Path(destination_relative), description) if path.exists() else None
 
@@ -73,154 +90,159 @@ def sha256sum(path: Path) -> str:
 
 
 def build_repo_copy_specs(outputs_root: Path) -> list[CopySpec]:
+    step0_root = resolve_step_output_dir(outputs_root, "00_ideal_models")
+    step1_root = resolve_step_output_dir(outputs_root, "01_boundary_parameter_calibration")
+    step2_root = resolve_step_output_dir(outputs_root, "02_physics_weight_sweep")
+    step3_root = resolve_step_output_dir(outputs_root, "03_pressure_constraint_sensitivity")
+    step4_root = resolve_step_output_dir(outputs_root, "04_message_passing_sensitivity")
     specs: list[CopySpec | None] = [
         maybe_copy_spec(
-            outputs_root / "00_ideal_models" / "poiseuille_only_baseline" / "default_partitioned" / "summary.csv",
+            (step0_root / "poiseuille_only_baseline" / "default_partitioned" / "summary.csv") if step0_root else Path("__missing__"),
             "dc/00_ideal_models/poiseuille_only_baseline/default_partitioned/summary.csv",
             "DC Step 0 Poiseuille baseline summary table",
         ),
         maybe_copy_spec(
-            outputs_root / "00_ideal_models" / "poiseuille_only_baseline" / "default_partitioned" / "summary.yaml",
+            (step0_root / "poiseuille_only_baseline" / "default_partitioned" / "summary.yaml") if step0_root else Path("__missing__"),
             "dc/00_ideal_models/poiseuille_only_baseline/default_partitioned/summary.yaml",
             "DC Step 0 Poiseuille baseline summary YAML",
         ),
         maybe_copy_spec(
-            outputs_root / "00_ideal_models" / "poiseuille_only_baseline" / "default_partitioned" / "poiseuille_summary.csv",
+            (step0_root / "poiseuille_only_baseline" / "default_partitioned" / "poiseuille_summary.csv") if step0_root else Path("__missing__"),
             "dc/00_ideal_models/poiseuille_only_baseline/default_partitioned/poiseuille_summary.csv",
             "DC Step 0 Poiseuille-only baseline summary",
         ),
         maybe_copy_spec(
-            outputs_root / "00_ideal_models" / "poiseuille_only_baseline" / "default_partitioned" / "figures",
+            (step0_root / "poiseuille_only_baseline" / "default_partitioned" / "figures") if step0_root else Path("__missing__"),
             "dc/00_ideal_models/poiseuille_only_baseline/default_partitioned/figures",
             "DC Step 0 Poiseuille baseline figures",
         ),
         maybe_copy_spec(
-            outputs_root / "01_boundary_parameter_calibration" / "boundary_weight_summary.csv",
+            (step1_root / "boundary_weight_summary.csv") if step1_root else Path("__missing__"),
             "dc/01_boundary_parameter_calibration/boundary_weight_summary.csv",
             "DC Step 1 boundary-weight summary table",
         ),
         maybe_copy_spec(
-            outputs_root / "01_boundary_parameter_calibration" / "boundary_weight_summary.yaml",
+            (step1_root / "boundary_weight_summary.yaml") if step1_root else Path("__missing__"),
             "dc/01_boundary_parameter_calibration/boundary_weight_summary.yaml",
             "DC Step 1 boundary-weight summary YAML",
         ),
         maybe_copy_spec(
-            outputs_root / "01_boundary_parameter_calibration" / "figures",
+            (step1_root / "figures") if step1_root else Path("__missing__"),
             "dc/01_boundary_parameter_calibration/figures",
             "DC Step 1 boundary-parameter calibration figures",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "launcher_manifest.csv",
+            (step2_root / "launcher_manifest.csv") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/launcher_manifest.csv",
             "DC Step 2 launcher manifest",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "physics_weight_all_runs.csv",
+            (step2_root / "physics_weight_all_runs.csv") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/physics_weight_all_runs.csv",
             "DC Step 2 all-runs summary",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "physics_weight_analysis.yaml",
+            (step2_root / "physics_weight_analysis.yaml") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/physics_weight_analysis.yaml",
             "DC Step 2 analysis YAML",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "physics_weight_gnn_summary.csv",
+            (step2_root / "physics_weight_gnn_summary.csv") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/physics_weight_gnn_summary.csv",
             "DC Step 2 GNN summary",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "physics_weight_poiseuille_summary.csv",
+            (step2_root / "physics_weight_poiseuille_summary.csv") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/physics_weight_poiseuille_summary.csv",
             "DC Step 2 Poiseuille summary",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "representative_configurations.csv",
+            (step2_root / "representative_configurations.csv") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/representative_configurations.csv",
             "DC Step 2 representative configurations",
         ),
         maybe_copy_spec(
-            outputs_root / "02_physics_weight_sweep" / "figures",
+            (step2_root / "figures") if step2_root else Path("__missing__"),
             "dc/02_physics_weight_sweep/figures",
             "DC Step 2 figures",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "pressure_constraint_all_runs.csv",
+            (step3_root / "pressure_constraint_all_runs.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/pressure_constraint_all_runs.csv",
             "DC Step 3 all-runs summary",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "pressure_constraint_gnn_summary.csv",
+            (step3_root / "pressure_constraint_gnn_summary.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/pressure_constraint_gnn_summary.csv",
             "DC Step 3 GNN summary",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "pressure_constraint_poiseuille_summary.csv",
+            (step3_root / "pressure_constraint_poiseuille_summary.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/pressure_constraint_poiseuille_summary.csv",
             "DC Step 3 Poiseuille summary",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "pressure_field_pairwise_metrics.csv",
+            (step3_root / "pressure_field_pairwise_metrics.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/pressure_field_pairwise_metrics.csv",
             "DC Step 3 pressure field pairwise metrics",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "correction_field_pairwise_metrics.csv",
+            (step3_root / "correction_field_pairwise_metrics.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/correction_field_pairwise_metrics.csv",
             "DC Step 3 correction field pairwise metrics",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "pressure_correlation_matrix.csv",
+            (step3_root / "pressure_correlation_matrix.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/pressure_correlation_matrix.csv",
             "DC Step 3 pressure correlation matrix table",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "correction_correlation_matrix.csv",
+            (step3_root / "correction_correlation_matrix.csv") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/correction_correlation_matrix.csv",
             "DC Step 3 correction correlation matrix table",
         ),
         maybe_copy_spec(
-            outputs_root / "03_pressure_constraint_sensitivity" / "figures",
+            (step3_root / "figures") if step3_root else Path("__missing__"),
             "dc/03_pressure_constraint_sensitivity/figures",
             "DC Step 3 figures",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "summary.csv",
+            (step4_root / "summary.csv") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/summary.csv",
             "DC Step 4 summary table",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "summary.yaml",
+            (step4_root / "summary.yaml") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/summary.yaml",
             "DC Step 4 summary YAML",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "flow_rmse_vs_K.png",
+            (step4_root / "flow_rmse_vs_K.png") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/flow_rmse_vs_K.png",
             "DC Step 4 flow RMSE plot",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "kirchhoff_rms_vs_K.png",
+            (step4_root / "kirchhoff_rms_vs_K.png") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/kirchhoff_rms_vs_K.png",
             "DC Step 4 Kirchhoff RMS plot",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "pressure_maps_by_K.png",
+            (step4_root / "pressure_maps_by_K.png") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/pressure_maps_by_K.png",
             "DC Step 4 pressure maps by K",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "flow_residual_maps_by_K.png",
+            (step4_root / "flow_residual_maps_by_K.png") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/flow_residual_maps_by_K.png",
             "DC Step 4 flow residual maps by K",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "kirchhoff_residual_maps_by_K.png",
+            (step4_root / "kirchhoff_residual_maps_by_K.png") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/kirchhoff_residual_maps_by_K.png",
             "DC Step 4 Kirchhoff residual maps by K",
         ),
         maybe_copy_spec(
-            outputs_root / "04_message_passing_sensitivity" / "conductance_correction_maps_by_K.png",
+            (step4_root / "conductance_correction_maps_by_K.png") if step4_root else Path("__missing__"),
             "dc/04_message_passing_sensitivity/conductance_correction_maps_by_K.png",
             "DC Step 4 conductance correction maps by K",
         ),
@@ -229,16 +251,21 @@ def build_repo_copy_specs(outputs_root: Path) -> list[CopySpec]:
 
 
 def build_archive_specs(outputs_root: Path, args: argparse.Namespace) -> list[ArchiveSpec]:
+    step0_root = resolve_step_output_dir(outputs_root, "00_ideal_models")
+    step1_root = resolve_step_output_dir(outputs_root, "01_boundary_parameter_calibration")
+    step2_root = resolve_step_output_dir(outputs_root, "02_physics_weight_sweep")
+    step3_root = resolve_step_output_dir(outputs_root, "03_pressure_constraint_sensitivity")
+    step4_root = resolve_step_output_dir(outputs_root, "04_message_passing_sensitivity")
     candidate_specs = [
-        (args.include_step0_raw, "dc_step00_raw.tar.gz", "Full raw outputs for DC Step 0.", outputs_root / "00_ideal_models"),
-        (args.include_step1_raw, "dc_step01_raw.tar.gz", "Full raw outputs for DC Step 1.", outputs_root / "01_boundary_parameter_calibration"),
-        (args.include_step2_raw, "dc_step02_raw.tar.gz", "Full raw outputs for DC Step 2.", outputs_root / "02_physics_weight_sweep"),
-        (args.include_step3_raw, "dc_step03_raw.tar.gz", "Full raw outputs for DC Step 3.", outputs_root / "03_pressure_constraint_sensitivity"),
-        (args.include_step4_raw, "dc_step04_raw.tar.gz", "Full raw outputs for DC Step 4.", outputs_root / "04_message_passing_sensitivity"),
+        (args.include_step0_raw, "dc_step00_raw.tar.gz", "Full raw outputs for DC Step 0.", step0_root),
+        (args.include_step1_raw, "dc_step01_raw.tar.gz", "Full raw outputs for DC Step 1.", step1_root),
+        (args.include_step2_raw, "dc_step02_raw.tar.gz", "Full raw outputs for DC Step 2.", step2_root),
+        (args.include_step3_raw, "dc_step03_raw.tar.gz", "Full raw outputs for DC Step 3.", step3_root),
+        (args.include_step4_raw, "dc_step04_raw.tar.gz", "Full raw outputs for DC Step 4.", step4_root),
     ]
     specs: list[ArchiveSpec] = []
     for enabled, name, description, path in candidate_specs:
-        if enabled and path.exists():
+        if enabled and path is not None and path.exists():
             specs.append(ArchiveSpec(name=name, description=description, source=path.resolve()))
     return specs
 
@@ -324,6 +351,46 @@ def write_checksums(release_bundle_root: Path) -> None:
     (release_bundle_root / "SHA256SUMS").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
+def write_bundle_readme(repo_bundle_dc_root: Path) -> None:
+    readme = """# Somite21 DC Release Bundle
+
+This folder contains the lightweight DC results bundle for the Somite21 dataset.
+
+## Contents
+
+- `00_ideal_models/`
+  Poiseuille-only baseline summaries and figures.
+- `01_boundary_parameter_calibration/`
+  Boundary-weight calibration summaries and figures.
+- `02_physics_weight_sweep/`
+  Full sweep summary tables, representative-configuration table, and figures.
+- `03_pressure_constraint_sensitivity/`
+  Pressure-constraint summary tables, pairwise/correlation tables, and figures.
+- `04_message_passing_sensitivity/`
+  Message-passing depth summary files and K-sweep figures.
+
+## Notes
+
+- This is the lightweight bundle intended for GitHub release upload.
+- It includes summary tables, metadata tables, and final figures.
+- It does not include the full raw run directories for the DC sweeps.
+- For Step 3 and Step 4, the packaged outputs correspond to the Somite21 run that used:
+  - `lambda_q = 100`
+  - `lambda_k = 0.1`
+  - `lambda_delta = 0.1`
+
+## Key files
+
+- Step 2 representative configuration table:
+  `02_physics_weight_sweep/representative_configurations.csv`
+- Step 3 GNN summary:
+  `03_pressure_constraint_sensitivity/pressure_constraint_gnn_summary.csv`
+- Step 4 summary:
+  `04_message_passing_sensitivity/summary.csv`
+"""
+    (repo_bundle_dc_root / "README.md").write_text(readme, encoding="utf-8")
+
+
 def main() -> None:
     args = parse_args()
     outputs_root = args.outputs_root.expanduser().resolve()
@@ -355,6 +422,7 @@ def main() -> None:
 
     rows: list[dict[str, object]] = []
     rows.extend(stage_copy_specs(copy_specs, repo_bundle_root, dry_run=False))
+    write_bundle_readme(repo_bundle_root / "dc")
     rows.extend(stage_archives(archive_specs, release_bundle_root, dry_run=False))
     rows.append(create_repo_bundle_tar(repo_bundle_root, release_bundle_root))
 

@@ -23,14 +23,27 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_ROOT = PROJECT_ROOT / "outputs" / "ac" / "03_distensibility_alpha_profiles" / "H1"
 DEFAULT_MODEL_NAME = "taylor_ideal"
+DEFAULT_LABELS = ("B1", "F1", "K1")
+DEFAULT_ALPHAS = (0.0, 1.0, 2.0)
+DEFAULT_D0_VALUES = (1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-root", type=Path, default=DEFAULT_INPUT_ROOT)
     parser.add_argument("--representatives-csv", type=Path, default=None)
+    parser.add_argument("--combined-results-csv", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME)
+    parser.add_argument(
+        "--selection-mode",
+        choices=("representatives", "requested_d0s"),
+        default="representatives",
+    )
+    parser.add_argument("--labels", nargs="+", default=list(DEFAULT_LABELS))
+    parser.add_argument("--alphas", nargs="+", type=float, default=list(DEFAULT_ALPHAS))
+    parser.add_argument("--d0-values", nargs="+", type=float, default=list(DEFAULT_D0_VALUES))
+    parser.add_argument("--include-best-d0", action="store_true")
     parser.add_argument("--dpi", type=int, default=300)
     return parser.parse_args()
 
@@ -89,9 +102,9 @@ def transform_mosaic_coords(
 ) -> tuple[np.ndarray, np.ndarray]:
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    _, x_max = x_bounds
-    _, y_max = y_bounds
-    return y_max - y_arr, x_max - x_arr
+    x_min, _ = x_bounds
+    y_min, _ = y_bounds
+    return x_arr - x_min, y_arr - y_min
 
 
 def transform_segments(
@@ -107,8 +120,8 @@ def transform_segments(
 
 
 def decorate_field_axes(ax: plt.Axes, x_bounds: tuple[float, float], y_bounds: tuple[float, float]) -> None:
-    ax.set_xlim((0.0, y_bounds[1] - y_bounds[0]))
-    ax.set_ylim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_xlim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_ylim((0.0, y_bounds[1] - y_bounds[0]))
     ax.set_aspect("equal")
 
 
@@ -192,6 +205,131 @@ def load_field_tables(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def label_text(alpha: float, d0: float) -> str:
     return rf"$\alpha = {alpha:g}$, $D_0 = {d0:.3g}$"
+
+
+def load_csv(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    if df.empty:
+        raise ValueError(f"No rows found in {path}")
+    return df
+
+
+def normalize_numeric(df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
+    out = df.copy()
+    for column in columns:
+        if column in out.columns:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out
+
+
+def sanitize_float_token(value: float) -> str:
+    if not math.isfinite(value):
+        return "nan"
+    if value == 0.0:
+        return "0"
+    return np.format_float_positional(value, trim="-").replace(".", "p").replace("-", "m")
+
+
+def select_matching_row(
+    df: pd.DataFrame,
+    *,
+    model_name: str,
+    representative_label: str,
+    alpha: float,
+    d0: float,
+) -> pd.Series:
+    subset = df[
+        df["model_name"].astype(str).eq(model_name)
+        & df["representative_label"].astype(str).eq(representative_label)
+        & np.isclose(df["alpha"], alpha, equal_nan=False)
+        & np.isclose(df["D0"], d0, rtol=0.0, atol=max(abs(d0), 1.0) * 1.0e-12)
+    ].copy()
+    if subset.empty:
+        raise ValueError(
+            f"No matching row found for model={model_name}, label={representative_label}, alpha={alpha}, D0={d0}"
+        )
+    subset = subset.sort_values(["D0"], kind="stable")
+    return subset.iloc[0]
+
+
+def build_harmonized_run_dir(input_root: Path, row: pd.Series) -> Path:
+    return (
+        input_root
+        / str(row["representative_label"])
+        / str(row["alpha_dir"])
+        / str(row["D0_dir"])
+        / "models"
+        / str(row["model_name"])
+    )
+
+
+def build_requested_selections(
+    combined_df: pd.DataFrame,
+    representatives_df: pd.DataFrame,
+    *,
+    input_root: Path,
+    model_name: str,
+    labels: list[str],
+    alphas: list[float],
+    d0_values: list[float],
+    include_best_d0: bool,
+) -> list[dict[str, object]]:
+    selections: list[dict[str, object]] = []
+
+    for label in labels:
+        for alpha in alphas:
+            for d0 in d0_values:
+                row = select_matching_row(
+                    combined_df,
+                    model_name=model_name,
+                    representative_label=label,
+                    alpha=alpha,
+                    d0=d0,
+                )
+                selections.append(
+                    {
+                        "kind": "requested",
+                        "representative_label": label,
+                        "alpha": float(alpha),
+                        "D0": float(row["D0"]),
+                        "run_dir": build_harmonized_run_dir(input_root, row),
+                        "stem": f"{label}_alpha_{int(round(alpha))}_D0_{sanitize_float_token(float(row['D0']))}",
+                        "title": f"{label}, {label_text(float(alpha), float(row['D0']))}",
+                    }
+                )
+
+            if not include_best_d0:
+                continue
+
+            rep_subset = representatives_df[
+                representatives_df["model_name"].astype(str).eq(model_name)
+                & representatives_df["representative_label"].astype(str).eq(label)
+                & np.isclose(representatives_df["alpha"], alpha, equal_nan=False)
+            ].copy()
+            if rep_subset.empty:
+                raise ValueError(f"No best-D0 representative found for model={model_name}, label={label}, alpha={alpha}")
+            rep_row = rep_subset.iloc[0]
+            best_d0 = float(rep_row["representative_D0"])
+            matched = select_matching_row(
+                combined_df,
+                model_name=model_name,
+                representative_label=label,
+                alpha=alpha,
+                d0=best_d0,
+            )
+            selections.append(
+                {
+                    "kind": "best",
+                    "representative_label": label,
+                    "alpha": float(alpha),
+                    "D0": float(matched["D0"]),
+                    "run_dir": build_harmonized_run_dir(input_root, matched),
+                    "stem": f"{label}_alpha_{int(round(alpha))}_best_D0_{sanitize_float_token(float(matched['D0']))}",
+                    "title": f"{label}, best {label_text(float(alpha), float(matched['D0']))}",
+                }
+            )
+
+    return selections
 
 
 def plot_field_set(
@@ -291,40 +429,75 @@ def main() -> None:
     configure_matplotlib()
 
     input_root = args.input_root.expanduser().resolve()
-    representatives_csv = (
-        args.representatives_csv.expanduser().resolve()
-        if args.representatives_csv is not None
-        else input_root / "representative_configurations.csv"
-    )
     output_dir = (
         args.output_dir.expanduser().resolve()
         if args.output_dir is not None
         else input_root / "figures" / "representative_fields" / args.model_name
     )
 
-    reps = pd.read_csv(representatives_csv)
-    reps = reps[
-        reps["model_name"].astype(str).eq(str(args.model_name))
-        & reps["profile_run_dir"].notna()
-    ].copy()
-    if reps.empty:
-        raise ValueError(f"No representative rows found for model_name={args.model_name!r} in {representatives_csv}")
+    representatives_csv = (
+        args.representatives_csv.expanduser().resolve()
+        if args.representatives_csv is not None
+        else input_root / "representative_configurations.csv"
+    )
+    combined_results_csv = (
+        args.combined_results_csv.expanduser().resolve()
+        if args.combined_results_csv is not None
+        else input_root / "combined_results.csv"
+    )
 
-    reps["alpha"] = pd.to_numeric(reps["alpha"], errors="coerce")
-    reps["representative_D0"] = pd.to_numeric(reps["representative_D0"], errors="coerce")
-    reps = reps.sort_values(["representative_label", "alpha"])
+    representatives_df = normalize_numeric(load_csv(representatives_csv), ("alpha", "representative_D0"))
+    combined_df = normalize_numeric(load_csv(combined_results_csv), ("alpha", "D0"))
 
-    for _, row in reps.iterrows():
-        parent_run_dir = Path(str(row["profile_run_dir"])).expanduser().resolve()
-        model_run_dir = parent_run_dir / "models" / str(args.model_name)
+    if args.selection_mode == "representatives":
+        reps = representatives_df[
+            representatives_df["model_name"].astype(str).eq(str(args.model_name))
+        ].copy()
+        if reps.empty:
+            raise ValueError(f"No representative rows found for model_name={args.model_name!r} in {representatives_csv}")
+        reps = reps.sort_values(["representative_label", "alpha"])
+        selections = []
+        for _, row in reps.iterrows():
+            matched = select_matching_row(
+                combined_df,
+                model_name=str(args.model_name),
+                representative_label=str(row["representative_label"]),
+                alpha=float(row["alpha"]),
+                d0=float(row["representative_D0"]),
+            )
+            rep_label = str(row["representative_label"])
+            alpha = float(row["alpha"])
+            d0 = float(matched["D0"])
+            selections.append(
+                {
+                    "run_dir": build_harmonized_run_dir(input_root, matched),
+                    "stem": f"{rep_label}_alpha_{int(round(alpha))}",
+                    "title": f"{rep_label}, {label_text(alpha, d0)}",
+                }
+            )
+    else:
+        selections = build_requested_selections(
+            combined_df,
+            representatives_df,
+            input_root=input_root,
+            model_name=str(args.model_name),
+            labels=[str(label) for label in args.labels],
+            alphas=[float(alpha) for alpha in args.alphas],
+            d0_values=[float(d0) for d0 in args.d0_values],
+            include_best_d0=bool(args.include_best_d0),
+        )
+
+    for selection in selections:
+        model_run_dir = Path(str(selection["run_dir"])).expanduser().resolve()
         if not model_run_dir.exists():
             raise FileNotFoundError(f"Model run directory not found: {model_run_dir}")
-        rep_label = str(row["representative_label"])
-        alpha = float(row["alpha"])
-        d0 = float(row["representative_D0"])
-        stem = f"{rep_label}_alpha_{int(round(alpha))}"
-        title = f"{rep_label}, {label_text(alpha, d0)}"
-        plot_field_set(model_run_dir, output_dir, stem, title, args.dpi)
+        plot_field_set(
+            model_run_dir,
+            output_dir,
+            str(selection["stem"]),
+            str(selection["title"]),
+            args.dpi,
+        )
 
     print(f"[ok] Wrote AC representative field plots to {output_dir}")
 

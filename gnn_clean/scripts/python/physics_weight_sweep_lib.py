@@ -162,6 +162,17 @@ def score_for_regime(regime: str, scores: dict[str, float]) -> float:
     return float(scores.get(key, float("nan")))
 
 
+def euclidean_distance_from_origin(row: dict[str, object]) -> float:
+    try:
+        flow = float(row.get("flow_rmse_nl_s"))
+        kirchhoff = float(row.get("kirchhoff_rms_per_internal_node_nl_s"))
+    except (TypeError, ValueError):
+        return float("inf")
+    if not (math.isfinite(flow) and math.isfinite(kirchhoff)):
+        return float("inf")
+    return math.hypot(flow, kirchhoff)
+
+
 def representative_sort_key(row: dict[str, object]) -> tuple[float, float, float, float, str]:
     def number(key: str) -> float:
         value = row.get(key)
@@ -173,7 +184,7 @@ def representative_sort_key(row: dict[str, object]) -> tuple[float, float, float
 
     return (
         number("pareto_rank"),
-        number("selection_score"),
+        euclidean_distance_from_origin(row),
         number("delta_rms"),
         number("delta_saturation_fraction"),
         str(row.get("run_name", "")),

@@ -166,14 +166,14 @@ def transform_mosaic_coords(
 ) -> tuple[np.ndarray, np.ndarray]:
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    _, x_max = x_bounds
-    _, y_max = y_bounds
-    return y_max - y_arr, x_max - x_arr
+    x_min, _ = x_bounds
+    y_min, _ = y_bounds
+    return x_arr - x_min, y_arr - y_min
 
 
 def decorate_axes(ax: plt.Axes, x_bounds: tuple[float, float], y_bounds: tuple[float, float]) -> None:
-    ax.set_xlim((0.0, y_bounds[1] - y_bounds[0]))
-    ax.set_ylim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_xlim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_ylim((0.0, y_bounds[1] - y_bounds[0]))
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])

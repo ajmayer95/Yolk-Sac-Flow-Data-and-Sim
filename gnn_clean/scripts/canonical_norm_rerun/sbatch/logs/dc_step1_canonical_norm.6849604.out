@@ -1,0 +1,25 @@
+[ok] Combined summary written to /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical_norm/dc/01_boundary_parameter_calibration/boundary_weight_summary.csv
+[ok] Key columns:
+  - lambda_b
+  - flow_rmse_nl_s
+  - flow_mae_nl_s
+  - flow_nrmse_median
+  - kirchhoff_rms_per_internal_node_nl_s
+  - kirchhoff_mae_per_internal_node_nl_s
+  - kirchhoff_p95_abs_nl_s
+  - kirchhoff_max_abs_nl_s
+  - arterial_equality_residual_pa
+  - venous_equality_residual_pa
+  - boundary_residual_rms_pa
+  - boundary_residual_max_pa
+  - pressure_min_pa
+  - pressure_max_pa
+  - pressure_range_pa
+  - solver_success
+  - runtime_seconds
+usage: plot_boundary_weight_sweep.py [-h] [--input-csv INPUT_CSV]
+                                     [--output-dir OUTPUT_DIR]
+                                     [--lambda-b LAMBDA_B]
+                                     [--input-root INPUT_ROOT]
+plot_boundary_weight_sweep.py: error: unrecognized arguments: --overwrite
+ERROR conda.cli.main_run:execute(148): `conda run python scripts/python/plot_boundary_weight_sweep.py --input-csv outputs_canonical_norm/dc/01_boundary_parameter_calibration/boundary_weight_summary.csv --input-root outputs_canonical_norm/dc/01_boundary_parameter_calibration --output-dir outputs_canonical_norm/dc/01_boundary_parameter_calibration/figures --lambda-b 10 --overwrite` failed. (See above for error)

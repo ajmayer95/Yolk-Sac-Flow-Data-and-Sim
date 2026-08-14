@@ -127,6 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name", default="")
     parser.add_argument("--preset", choices=sorted(PRESETS), default="solver_QKB_outer_QKBdelta")
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--weight-decay", type=float, default=None)
@@ -206,6 +207,7 @@ def default_config() -> dict:
             "pressure_constraints": ["equal-a-equal-v"],
             "alpha_pa": None,
             "use_snr_weights": True,
+            "use_observed_flow_snr_weighting": True,
             "flow_scale_mode": "median_abs",
             "solver_device": "same",
             "pressure_detach": True,
@@ -304,6 +306,13 @@ def maybe_initialize_decoder_near_zero(model: nn.Module, enabled: bool) -> None:
         nn.init.zeros_(last.bias)
 
 
+def observed_flow_row_weights(data, device: torch.device, config: dict) -> torch.Tensor:
+    physics_cfg = config.get("physics", {})
+    if not bool(physics_cfg.get("use_observed_flow_snr_weighting", physics_cfg.get("use_snr_weights", True))):
+        return torch.ones(data.n_edges, dtype=torch.float64, device=device)
+    return data.observed_flow_weight.to(device=device, dtype=torch.float64)
+
+
 class DifferentiablePressureSolver(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
@@ -340,6 +349,7 @@ class DifferentiablePressureSolver(nn.Module):
             lambda_flow_residual=float(
                 physics_cfg.get("pressure_solver_lambda_flow_residual", 0.0)
             ),
+            flow_row_weights=observed_flow_row_weights(data, device, self.config),
             device=device,
         )
 
@@ -359,10 +369,7 @@ class DifferentiablePressureSolver(nn.Module):
             mode=str(physics_cfg.get("flow_scale_mode", "median_abs")),
         ).to(dtype=torch.float64).clamp_min(1.0e-30)
         flow_residual = q_pred[valid_edges] - q_obs[valid_edges]
-        if bool(physics_cfg.get("use_snr_weights", True)):
-            flow_row_weights = data.dc_loss_weight.to(device=device, dtype=torch.float64)[valid_edges] ** 2
-        else:
-            flow_row_weights = torch.ones(int(valid_edges.sum()), dtype=torch.float64, device=device)
+        flow_row_weights = observed_flow_row_weights(data, device, self.config)[valid_edges]
         weighted_flow_num = torch.sum(flow_row_weights * flow_residual**2)
         weighted_flow_denom = torch.sum(flow_row_weights * q_obs[valid_edges] ** 2).clamp_min(1.0e-30)
         kirchhoff_rows = torch.nonzero(
@@ -515,7 +522,7 @@ def collect_global_metrics(outputs, data, config: dict) -> dict[str, torch.Tenso
 def outer_loss_and_terms(outputs, data, config: dict, edge_mask: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     q_pred = outputs["q_pred_m3_s"]
     q_obs = observed_flow_m3_s(data).to(device=q_pred.device)
-    weights = data.dc_loss_weight.to(device=q_pred.device) ** 2
+    weights = observed_flow_row_weights(data, q_pred.device, config)
     active = edge_mask.to(device=q_pred.device) & torch.isfinite(q_obs)
     if bool(torch.any(active)):
         residual = q_pred[active] - q_obs[active]
@@ -578,6 +585,10 @@ def resolved_config_snapshot(config: dict) -> dict[str, object]:
             "pressure_constraints": list(physics_cfg.get("pressure_constraints", [])),
             "alpha_pa": physics_cfg.get("alpha_pa"),
             "use_snr_weights": physics_cfg.get("use_snr_weights"),
+            "use_observed_flow_snr_weighting": physics_cfg.get(
+                "use_observed_flow_snr_weighting",
+                physics_cfg.get("use_snr_weights"),
+            ),
             "flow_scale_mode": physics_cfg.get("flow_scale_mode"),
             "solver_device": physics_cfg.get("solver_device"),
             "pressure_solver_mode": physics_cfg.get("pressure_solver_mode"),
@@ -716,7 +727,7 @@ def exploration_diagnostics_row(
 ) -> dict[str, object]:
     device = outputs["delta_e"].device
     q_obs = observed_flow_m3_s(data).to(device=device)
-    weights = data.dc_loss_weight.to(device=device) ** 2
+    weights = observed_flow_row_weights(data, device, config)
     valid_edges = valid_observed_edge_mask(data).to(device=device)
     eps_abs = (
         outputs["solver_diagnostics"]["flow_scale_m3_s"]
@@ -1161,7 +1172,7 @@ def pressure_sanity_checks(model: nn.Module, solver: DifferentiablePressureSolve
     )
     q_obs = observed_flow_m3_s(data).to(device=device)
     valid_edges = valid_observed_edge_mask(data).to(device=device)
-    weights = data.dc_loss_weight.to(device=device) ** 2
+    weights = observed_flow_row_weights(data, device, config)
     return {
         "delta_zero_reproduces_solver_max_abs_flow_diff_m3_s": float(
             torch.max(torch.abs(recomputed - zero_solver["q_pred_m3_s"])).detach().cpu()
@@ -1221,7 +1232,7 @@ def edge_rows(outputs, data, config: dict) -> list[dict[str, object]]:
     conductance = outputs["Gcorr_e"].detach().cpu().numpy()
     conductance_ratio = outputs["Gcorr_over_G0"].detach().cpu().numpy()
     drop = outputs["edge_pressure_drop_pa"].detach().cpu().numpy()
-    weights = data.dc_loss_weight.detach().cpu().numpy()
+    weights = observed_flow_row_weights(data, torch.device("cpu"), config).detach().cpu().numpy()
     valid = valid_observed_edge_mask(data).detach().cpu().numpy().astype(bool)
     q_scale = float(outputs["solver_diagnostics"]["flow_scale_m3_s"].detach().cpu())
     eps_abs = q_scale * float(config["physics"].get("sign_eps_relative", 1.0e-6))
@@ -1347,11 +1358,23 @@ def build_summary(
         "n_edges": int(data.n_edges),
         "n_observed_edges": int(valid_observed_edge_mask(data).sum().detach().cpu()),
         "device": str(args.device),
+        "resolved_runtime_device": str(outputs["delta_e"].device),
         "viscosity_pa_s": float(args.viscosity_pa_s),
         "pressure_constraints": "|".join(selected_pressure_constraints(config)),
         "arterial_flow_mode": str(config["physics"].get("arterial_flow_mode")),
         "use_snr_weights": bool(config["physics"].get("use_snr_weights", True)),
+        "use_observed_flow_snr_weighting": bool(
+            config["physics"].get(
+                "use_observed_flow_snr_weighting",
+                config["physics"].get("use_snr_weights", True),
+            )
+        ),
         "flow_scale_mode": str(config["physics"].get("flow_scale_mode")),
+        **{
+            key: float(value)
+            for key, value in data.observed_flow_weight_stats.items()
+            if isinstance(value, (int, float, bool))
+        },
         "pressure_shape_reference": str(config["physics"].get("pressure_shape_reference")),
         "solver_device": str(config["physics"].get("solver_device")),
         "pressure_detach": bool(config["physics"].get("pressure_detach", False)),
@@ -1435,6 +1458,7 @@ def prepare_config(args: argparse.Namespace) -> dict:
         config["physics"]["pressure_detach"] = bool(args.pressure_detach)
     if args.no_snr_weights:
         config["physics"]["use_snr_weights"] = False
+        config["physics"]["use_observed_flow_snr_weighting"] = False
     return config
 
 
@@ -1463,7 +1487,7 @@ def main() -> None:
     config_snapshot = resolved_config_snapshot(config)
     config_snapshot["preset"] = args.preset
     set_random_seed(int(config["training"]["seed"]))
-    device = resolve_device(args.device)
+    device = resolve_device(args.device, require_cuda=bool(args.require_cuda))
     graph_path = args.graph.expanduser().resolve()
     data = build_real_gnn_data(graph_path, config)
     overwrite_base_conductance_from_viscosity(data, float(args.viscosity_pa_s))
@@ -1477,6 +1501,7 @@ def main() -> None:
 
     print("Resolved config snapshot:")
     print(config_snapshot)
+    print(f"Resolved runtime device: {device}")
 
     model, outputs, history, exploration_history, training_summary = train_model(
         model,

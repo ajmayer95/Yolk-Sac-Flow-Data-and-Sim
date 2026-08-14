@@ -451,6 +451,22 @@ def plot_nonselected_gnn(ax: plt.Axes, df: pd.DataFrame, x: str, y: str) -> None
         )
 
 
+def plot_all_gnn(ax: plt.Axes, df: pd.DataFrame, x: str, y: str) -> None:
+    for regime in REGIME_ORDER:
+        subset = df[df["weighting_regime"] == regime]
+        if subset.empty:
+            continue
+        ax.scatter(
+            subset[x],
+            subset[y],
+            s=34,
+            alpha=0.38,
+            color=REGIME_COLORS[regime],
+            edgecolors="none",
+            zorder=1,
+        )
+
+
 def build_tradeoff_envelope_curve(
     front: pd.DataFrame,
     pois_df: pd.DataFrame,
@@ -533,6 +549,43 @@ def build_tradeoff_envelope_curve(
     return x_fit, y_fit
 
 
+def build_smooth_loglog_curve(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    coords = (
+        df[[x, y]]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .sort_values([x, y], kind="mergesort")
+    )
+    if coords.empty:
+        return None
+    # If multiple runs land at the same x-value, average the y-values so the
+    # displayed curve remains single-valued while still following the baseline set.
+    collapsed = coords.groupby(x, as_index=False, sort=True)[y].mean()
+    if len(collapsed) < 2:
+        return None
+    x_fit_data = collapsed[x].to_numpy(dtype=float)
+    y_fit_data = collapsed[y].to_numpy(dtype=float)
+    positive = (x_fit_data > 0.0) & (y_fit_data > 0.0)
+    if int(np.sum(positive)) < 2:
+        return None
+    x_fit_data = x_fit_data[positive]
+    y_fit_data = y_fit_data[positive]
+    degree = min(3, len(x_fit_data) - 1)
+    if degree <= 0:
+        return None
+    log_x = np.log10(x_fit_data)
+    log_y = np.log10(y_fit_data)
+    coeffs = np.polyfit(log_x, log_y, deg=degree)
+    x_fit = np.linspace(float(np.min(x_fit_data)), float(np.max(x_fit_data)), 512)
+    y_fit = np.power(10.0, np.polyval(coeffs, np.log10(x_fit)))
+    return x_fit, y_fit
+
+
 def pareto_front_subset(df: pd.DataFrame, x: str, y: str) -> pd.DataFrame:
     coords = (
         df[[x, y]]
@@ -580,6 +633,30 @@ def plot_tradeoff_fit_curve(
         else:
             front = pareto_front_subset(df, x, y)
     fit = build_tradeoff_envelope_curve(front, df, x, y, x_domain=x_domain, loss_mode=loss_mode)
+    if fit is None:
+        return
+    x_fit, y_fit = fit
+    ax.plot(
+        x_fit,
+        y_fit,
+        color=color,
+        linewidth=1.8,
+        linestyle=linestyle,
+        alpha=0.9,
+        zorder=2.6,
+    )
+
+
+def plot_smooth_loglog_fit_curve(
+    ax: plt.Axes,
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    *,
+    color: str,
+    linestyle: str,
+) -> None:
+    fit = build_smooth_loglog_curve(df, x, y)
     if fit is None:
         return
     x_fit, y_fit = fit
@@ -715,6 +792,24 @@ def plot_pareto(
     save(fig, output_dir / filename, dpi=dpi)
 
 
+def plot_pareto_all_configs(
+    gnn_df: pd.DataFrame,
+    pois_df: pd.DataFrame,
+    output_dir: Path,
+    dpi: int,
+    filename: str,
+) -> None:
+    fig, ax = base_axes(
+        "Flow-conservation trade-off (all configurations)",
+        "Flow RMSE (nL/s)",
+        "Kirchhoff RMS per internal node (nL/s)",
+    )
+    plot_all_gnn(ax, gnn_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    add_legend(ax, include_baseline=True)
+    save(fig, output_dir / filename, dpi=dpi)
+
+
 def plot_pareto_with_tradeoff_fit(
     gnn_df: pd.DataFrame,
     pois_df: pd.DataFrame,
@@ -749,16 +844,67 @@ def plot_pareto_with_tradeoff_fit(
         fit_subset="pareto",
         loss_mode="absolute",
     )
-    plot_tradeoff_fit_curve(
+    plot_smooth_loglog_fit_curve(
         ax,
         pois_df,
         "flow_rmse_nl_s",
         "kirchhoff_rms_per_internal_node_nl_s",
-        x_domain=scatter_xlim,
         color="#5f5f5f",
         linestyle=":",
-        fit_subset="all",
-        loss_mode="log",
+    )
+    plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    ax.set_xlim(scatter_xlim)
+    ax.set_ylim(scatter_ylim)
+    add_legend(
+        ax,
+        include_baseline=True,
+        include_tradeoff_fit=True,
+        include_poiseuille_fit=True,
+    )
+    save(fig, output_dir / filename, dpi=dpi)
+
+
+def plot_pareto_with_tradeoff_fit_all_configs(
+    gnn_df: pd.DataFrame,
+    pois_df: pd.DataFrame,
+    output_dir: Path,
+    dpi: int,
+    filename: str,
+) -> None:
+    fig, ax = base_axes(
+        "Flow-conservation trade-off with trade-off fits (all configurations)",
+        "Flow RMSE (nL/s)",
+        "Kirchhoff RMS per internal node (nL/s)",
+    )
+    plot_all_gnn(ax, gnn_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    ref_fig, ref_ax = base_axes(
+        "",
+        "Flow RMSE (nL/s)",
+        "Kirchhoff RMS per internal node (nL/s)",
+    )
+    plot_all_gnn(ref_ax, gnn_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    plot_poiseuille(ref_ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
+    scatter_xlim = ref_ax.get_xlim()
+    scatter_ylim = ref_ax.get_ylim()
+    plt.close(ref_fig)
+    plot_tradeoff_fit_curve(
+        ax,
+        gnn_df,
+        "flow_rmse_nl_s",
+        "kirchhoff_rms_per_internal_node_nl_s",
+        x_domain=scatter_xlim,
+        color="#111111",
+        linestyle="--",
+        fit_subset="pareto",
+        loss_mode="absolute",
+    )
+    plot_smooth_loglog_fit_curve(
+        ax,
+        pois_df,
+        "flow_rmse_nl_s",
+        "kirchhoff_rms_per_internal_node_nl_s",
+        color="#5f5f5f",
+        linestyle=":",
     )
     plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
     ax.set_xlim(scatter_xlim)
@@ -892,9 +1038,9 @@ def transform_mosaic_coords(
 ) -> tuple[np.ndarray, np.ndarray]:
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    _, x_max = x_bounds
-    _, y_max = y_bounds
-    return y_max - y_arr, x_max - x_arr
+    x_min, _ = x_bounds
+    y_min, _ = y_bounds
+    return x_arr - x_min, y_arr - y_min
 
 
 def transform_segments(
@@ -910,8 +1056,8 @@ def transform_segments(
 
 
 def decorate_field_axes(ax: plt.Axes, x_bounds: tuple[float, float], y_bounds: tuple[float, float]) -> None:
-    ax.set_xlim((0.0, y_bounds[1] - y_bounds[0]))
-    ax.set_ylim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_xlim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_ylim((0.0, y_bounds[1] - y_bounds[0]))
     ax.set_aspect("equal")
 
 
@@ -1152,12 +1298,26 @@ def main() -> None:
         dpi=args.dpi,
         filename="flow_kirchhoff_pareto.png",
     )
+    plot_pareto_all_configs(
+        gnn_df=gnn_all,
+        pois_df=pois_summary,
+        output_dir=paths["output_dir"],
+        dpi=args.dpi,
+        filename="flow_kirchhoff_pareto_all_configurations.png",
+    )
     plot_pareto_with_tradeoff_fit(
         gnn_df=gnn_all,
         pois_df=pois_summary,
         output_dir=paths["output_dir"],
         dpi=args.dpi,
         filename="flow_kirchhoff_pareto_with_fit.png",
+    )
+    plot_pareto_with_tradeoff_fit_all_configs(
+        gnn_df=gnn_all,
+        pois_df=pois_summary,
+        output_dir=paths["output_dir"],
+        dpi=args.dpi,
+        filename="flow_kirchhoff_pareto_with_fit_all_configurations.png",
     )
     plot_delta_metric(
         gnn_df=gnn_summary,

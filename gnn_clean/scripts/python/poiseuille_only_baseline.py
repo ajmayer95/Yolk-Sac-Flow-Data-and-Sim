@@ -68,6 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-kirchhoff", type=float, default=1.0)
     parser.add_argument("--lambda-pressure-constraints", type=float, default=1.0)
     parser.add_argument("--lambda-flow-residual", type=float, default=1.0)
+    parser.add_argument("--no-observed-flow-snr-weighting", action="store_true")
     parser.add_argument(
         "--flip-observed-flow-sign",
         action="store_true",
@@ -452,6 +453,7 @@ def _observed_flow_block(
     dtype: torch.dtype,
     *,
     flip_observed_flow_sign: bool = False,
+    flow_row_weights: torch.Tensor | None = None,
 ) -> dict[str, object]:
     q_obs = (
         data.velocity_observed_m_s[:, 0, 0].to(device=device, dtype=dtype)
@@ -493,6 +495,11 @@ def _observed_flow_block(
     if bool(torch.any(dst_keep)):
         matrix[row_idx[dst_keep], cols_dst[dst_keep]] -= edge_g[dst_keep]
     rhs = q_obs.index_select(0, valid_edges)
+    if flow_row_weights is not None:
+        row_weights = flow_row_weights.to(device=device, dtype=dtype).index_select(0, valid_edges)
+        row_sqrt = torch.sqrt(row_weights.clamp_min(1.0e-12)).unsqueeze(1)
+        matrix = matrix * row_sqrt
+        rhs = rhs * row_sqrt.squeeze(1)
     return {
         "matrix": matrix,
         "rhs": rhs,
@@ -757,6 +764,7 @@ def _solve_reduced_constrained_pressure(
     lambda_pressure_constraints: float,
     lambda_flow_residual: float,
     flip_observed_flow_sign: bool = False,
+    use_observed_flow_snr_weighting: bool = True,
 ) -> dict[str, object]:
     system = _partitioned_system(
         data=data,
@@ -799,6 +807,11 @@ def _solve_reduced_constrained_pressure(
         device=device,
         dtype=dtype,
         flip_observed_flow_sign=flip_observed_flow_sign,
+        flow_row_weights=(
+            data.observed_flow_weight.to(device=device, dtype=dtype)
+            if bool(use_observed_flow_snr_weighting)
+            else None
+        ),
     )
     reduced_flow_matrix = flow_payload["matrix"]
     reduced_flow_rhs = flow_payload["rhs"]
@@ -1052,6 +1065,7 @@ def _solve_baseline(
     lambda_pressure_constraints: float,
     lambda_flow_residual: float,
     flip_observed_flow_sign: bool = False,
+    use_observed_flow_snr_weighting: bool = True,
 ) -> dict[str, object]:
     # Honor an explicitly requested reduced/partitioned solve mode for sweep
     # scripts, even if the default config still names the legacy hard solver.
@@ -1085,6 +1099,7 @@ def _solve_baseline(
             lambda_pressure_constraints=lambda_pressure_constraints,
             lambda_flow_residual=lambda_flow_residual,
             flip_observed_flow_sign=flip_observed_flow_sign,
+            use_observed_flow_snr_weighting=use_observed_flow_snr_weighting,
         )
     if solver_kind == "constrained_dc_equal_A_equal_V":
         solve_result = constrained_dc_solve_equal_A_equal_V_torch(
@@ -1165,6 +1180,7 @@ def main() -> None:
         lambda_pressure_constraints=float(args.lambda_pressure_constraints),
         lambda_flow_residual=float(args.lambda_flow_residual),
         flip_observed_flow_sign=bool(args.flip_observed_flow_sign),
+        use_observed_flow_snr_weighting=not bool(args.no_observed_flow_snr_weighting),
     )
 
     pressure = solve_result["pressure_pa"].detach().cpu().numpy().astype(np.float64)
@@ -1544,6 +1560,12 @@ def main() -> None:
         "lambda_pressure_constraints": float(args.lambda_pressure_constraints),
         "lambda_flow_residual": float(args.lambda_flow_residual),
         "flip_observed_flow_sign": bool(args.flip_observed_flow_sign),
+        "use_observed_flow_snr_weighting": not bool(args.no_observed_flow_snr_weighting),
+        **{
+            key: float(value)
+            for key, value in data.observed_flow_weight_stats.items()
+            if isinstance(value, (int, float, bool))
+        },
         "n_nodes": int(len(data.node_id)),
         "n_edges": int(data.n_edges),
         "n_observed_edges": int(np.sum(valid_mask)),

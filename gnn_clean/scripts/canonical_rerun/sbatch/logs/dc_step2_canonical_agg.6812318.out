@@ -1,0 +1,22 @@
+[info] DC Step 2 canonical sweep aggregates runs with fixed lambda_B=100.0.
+flow_prioritized:
+  F1  q_100__k_0p1__delta_0p1  score=0.0666818050706  flow_rmse_nl_s=0.0546591892811  kirchhoff_rms_per_internal_node_nl_s=0.102749652439  delta_rms=0.411692755915
+  F2  q_100__k_0p1__delta_1  score=0.0667122339674  flow_rmse_nl_s=0.0545899499789  kirchhoff_rms_per_internal_node_nl_s=0.103079085933  delta_rms=0.387074525234
+  F3  q_100__k_0p1__delta_10  score=0.067576742449  flow_rmse_nl_s=0.0560349087336  kirchhoff_rms_per_internal_node_nl_s=0.102202243595  delta_rms=0.193917020577
+  F4  q_100__k_1__delta_0p1  score=0.0690209112579  flow_rmse_nl_s=0.0587351448323  kirchhoff_rms_per_internal_node_nl_s=0.0998782105347  delta_rms=0.490138944338
+balanced:
+  B1  q_0p1__k_100__delta_100  score=0.0807842235886  flow_rmse_nl_s=0.0602717615083  kirchhoff_rms_per_internal_node_nl_s=0.101296685669  delta_rms=0.48920342698
+  B2  q_10__k_10__delta_0p1  score=0.0815284565774  flow_rmse_nl_s=0.0609433633778  kirchhoff_rms_per_internal_node_nl_s=0.102113549777  delta_rms=0.492750681597
+  B3  q_1__k_10__delta_10  score=0.0823545072471  flow_rmse_nl_s=0.0603247384997  kirchhoff_rms_per_internal_node_nl_s=0.104384275994  delta_rms=0.486822876135
+  B4  q_0p1__k_1__delta_1  score=0.08236164334  flow_rmse_nl_s=0.0609642284306  kirchhoff_rms_per_internal_node_nl_s=0.103759058249  delta_rms=0.427499223217
+conservation_prioritized:
+  K1  q_10__k_100__delta_10  score=0.0912016386544  flow_rmse_nl_s=0.063091193866  kirchhoff_rms_per_internal_node_nl_s=0.100571786917  delta_rms=0.381750135772
+  K2  q_1__k_100__delta_1  score=0.0938036413529  flow_rmse_nl_s=0.0618886741804  kirchhoff_rms_per_internal_node_nl_s=0.104441963744  delta_rms=0.437097580639
+  K3  q_0p1__k_100__delta_0p1  score=0.0939400669267  flow_rmse_nl_s=0.0617273821911  kirchhoff_rms_per_internal_node_nl_s=0.104677628505  delta_rms=0.416434871726
+  K4  q_10__k_100__delta_0p1  score=0.0948070072894  flow_rmse_nl_s=0.0639081692333  kirchhoff_rms_per_internal_node_nl_s=0.105106619975  delta_rms=0.431590107626
+correction_regularized:
+  C1  q_0p1__k_1__delta_10  score=0.0876960197639  flow_rmse_nl_s=0.0674302683874  kirchhoff_rms_per_internal_node_nl_s=0.10796177114  delta_rms=0.244031671248
+  C2  q_1__k_10__delta_100  score=0.0886309185274  flow_rmse_nl_s=0.0670606916038  kirchhoff_rms_per_internal_node_nl_s=0.110201145451  delta_rms=0.249531585566
+  C3  q_0p1__k_0p1__delta_1  score=0.0889636290902  flow_rmse_nl_s=0.068977754751  kirchhoff_rms_per_internal_node_nl_s=0.108949503429  delta_rms=0.240287901462
+  C4  q_10__k_10__delta_100  score=0.092293053791  flow_rmse_nl_s=0.0747423702566  kirchhoff_rms_per_internal_node_nl_s=0.109843737325  delta_rms=0.15803319563
+Command: /mnt/home/sswee/miniforge3/envs/yolk-sac/bin/python /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/scripts/python/analyze_physics_weight_sweep.py --input-root /mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_canonical/dc/02_physics_weight_sweep

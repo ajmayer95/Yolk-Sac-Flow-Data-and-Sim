@@ -61,16 +61,22 @@ backward compatibility with current rerun scripts and sbatch launchers.
   GPU-backed Step 02 launcher for the canonical harmonized dataset.
 - `dc_step02_canonical_norm_gpu.sbatch`
   GPU-backed Step 02 launcher for the canonical normalized dataset.
+- `dc_step02_harmonized_gpu.sbatch`
+  GPU-backed Step 02 launcher for `datasets_upload/harmonized_scaled_dataset.gpickle`.
 - `dc_step03_canonical_gpu.sbatch`
   GPU-backed Step 03 launcher for the canonical harmonized dataset.
 - `dc_step03_canonical_norm_gpu.sbatch`
   GPU-backed Step 03 launcher for the canonical normalized dataset.
+- `dc_step03_harmonized_gpu.sbatch`
+  GPU-backed Step 03 launcher for `datasets_upload/harmonized_scaled_dataset.gpickle`.
 - `dc_step03_somite21_gpu.sbatch`
   GPU-backed Step 03 launcher for the Somite21 dataset.
 - `dc_step04_canonical_gpu.sbatch`
   GPU-backed Step 04 launcher for the canonical harmonized dataset.
 - `dc_step04_canonical_norm_gpu.sbatch`
   GPU-backed Step 04 launcher for the canonical normalized dataset.
+- `dc_step04_harmonized_gpu.sbatch`
+  GPU-backed Step 04 launcher for `datasets_upload/harmonized_scaled_dataset.gpickle`.
 - `dc_step04_somite21_gpu.sbatch`
   GPU-backed Step 04 launcher for the Somite21 dataset.
 

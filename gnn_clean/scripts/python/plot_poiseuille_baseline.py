@@ -173,12 +173,16 @@ def transform_mosaic_coords(
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Plot the mosaic in the positive frame after the requested reorientation."""
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    _, x_max = x_bounds
-    _, y_max = y_bounds
-    transformed_x = y_max - y_arr
-    transformed_y = x_max - x_arr
+    x_min, _ = x_bounds
+    y_min, _ = y_bounds
+    # The prior plotting orientation already applied one rotate+mirror transform.
+    # Applying another 90-degree clockwise rotation followed by a vertical-axis
+    # mirror reduces to the raw mosaic orientation, shifted into the positive frame.
+    transformed_x = x_arr - x_min
+    transformed_y = y_arr - y_min
     return transformed_x, transformed_y
 
 
@@ -203,8 +207,8 @@ def bounds_from_nodes(nodes: pd.DataFrame) -> tuple[tuple[float, float], tuple[f
 
 
 def decorate_axes(ax: plt.Axes, x_bounds: tuple[float, float], y_bounds: tuple[float, float]) -> None:
-    ax.set_xlim((0.0, y_bounds[1] - y_bounds[0]))
-    ax.set_ylim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_xlim((0.0, x_bounds[1] - x_bounds[0]))
+    ax.set_ylim((0.0, y_bounds[1] - y_bounds[0]))
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])

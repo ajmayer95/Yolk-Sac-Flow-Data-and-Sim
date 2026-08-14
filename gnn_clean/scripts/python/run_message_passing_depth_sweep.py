@@ -32,7 +32,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from analyze_physics_weight_sweep import compute_from_gnn_run, safe_float
 from utils import load_yaml, write_yaml
-from workflow_selection import resolve_dc_representative_row
+from workflow_selection import resolve_dc_representative_row, resolve_dc_step2_row
 
 
 DEFAULT_STEP2_ROOT = PROJECT_ROOT / "outputs" / "dc" / "02_physics_weight_sweep"
@@ -83,6 +83,7 @@ def resolve_step2_inputs(output_root: Path, step2_root: Path, representative_csv
 
 
 def select_representatives(
+    step2_root: Path,
     rep_csv: Path,
     labels: list[str] | None,
     lambda_q: float | None = None,
@@ -92,8 +93,8 @@ def select_representatives(
     df = pd.read_csv(rep_csv)
     explicit_lambda = any(value is not None for value in (lambda_q, lambda_k, lambda_delta))
     if explicit_lambda:
-        resolved = resolve_dc_representative_row(
-            rep_csv,
+        resolved = resolve_dc_step2_row(
+            step2_root,
             lambda_q=lambda_q,
             lambda_k=lambda_k,
             lambda_delta=lambda_delta,
@@ -101,7 +102,7 @@ def select_representatives(
         subset = df[df["run_name"].astype(str) == str(resolved.get("run_name", ""))].copy()
         if subset.empty:
             raise ValueError(
-                "Resolved Step 2 representative run is missing from the representative CSV."
+                "Resolved Step 2 run is missing from the representative CSV."
             )
         return [subset.iloc[0]]
     if labels:
@@ -290,13 +291,13 @@ def transform_mosaic_coords(
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Rotate 90 degrees clockwise, then mirror across the vertical axis."""
+    """Rotate 90 degrees clockwise."""
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    _, x_max = x_bounds
-    _, y_max = y_bounds
-    transformed_x = y_max - y_arr
-    transformed_y = x_max - x_arr
+    x_min, x_max = x_bounds
+    y_min, _ = y_bounds
+    transformed_x = y_arr - y_min
+    transformed_y = (x_max - x_min) - (x_arr - x_min)
     return transformed_x, transformed_y
 
 
@@ -730,6 +731,7 @@ def main() -> None:
             f"For this output root, the expected sibling Step 2 directory is {step2_root}."
         )
     selected_rows = select_representatives(
+        step2_root,
         representative_csv,
         list(args.representative_labels) if args.representative_labels else None,
         lambda_q=args.lambda_q,

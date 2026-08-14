@@ -1,0 +1,2 @@
+plot_label,run_name,selection_category,selection_rank_within_regime,lambda_q,lambda_k,lambda_delta,marker,regime_color_name
+B1,q_10__k_10__delta_0p1,balanced,1.0,10.0,10.0,0.1,o,Balanced

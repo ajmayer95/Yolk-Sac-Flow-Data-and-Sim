@@ -20,11 +20,28 @@ def _float_matches(value: object, target: float, atol: float = 1.0e-12) -> bool:
     return math.isfinite(parsed) and math.isclose(parsed, float(target), rel_tol=0.0, abs_tol=atol)
 
 
+def _euclidean_error(row: dict[str, object]) -> float:
+    flow = _safe_float(row.get("flow_rmse_nl_s"))
+    kirchhoff = _safe_float(row.get("kirchhoff_rms_per_internal_node_nl_s"))
+    if not (math.isfinite(flow) and math.isfinite(kirchhoff)):
+        return float("inf")
+    return math.hypot(flow, kirchhoff)
+
+
 def load_dc_representative_rows(rep_csv: Path) -> list[dict[str, object]]:
     rep_csv = rep_csv.expanduser().resolve()
     if not rep_csv.exists():
         raise FileNotFoundError(f"Missing representative CSV: {rep_csv}")
     with rep_csv.open("r", newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def load_dc_all_run_rows(step2_root: Path) -> list[dict[str, object]]:
+    step2_root = step2_root.expanduser().resolve()
+    all_runs_csv = step2_root / "physics_weight_all_runs.csv"
+    if not all_runs_csv.exists():
+        raise FileNotFoundError(f"Missing DC Step 2 all-runs CSV: {all_runs_csv}")
+    with all_runs_csv.open("r", newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
@@ -65,7 +82,7 @@ def resolve_dc_representative_row(
         matches.sort(
             key=lambda row: (
                 _safe_float(row.get("selection_rank_within_regime")),
-                _safe_float(row.get("selection_score")),
+                _euclidean_error(row),
                 str(row.get("run_name", "")),
             )
         )
@@ -83,11 +100,61 @@ def resolve_dc_representative_row(
     balanced.sort(
         key=lambda row: (
             _safe_float(row.get("selection_rank_within_regime")),
-            _safe_float(row.get("selection_score")),
+            _euclidean_error(row),
             str(row.get("run_name", "")),
         )
     )
     return balanced[0]
+
+
+def resolve_dc_step2_row(
+    step2_root: Path,
+    lambda_q: float | None = None,
+    lambda_k: float | None = None,
+    lambda_delta: float | None = None,
+) -> dict[str, object]:
+    """Resolve a single Step 2 DC row.
+
+    Default behavior selects the best balanced representative from
+    ``representative_configurations.csv``.
+    If explicit lambdas are provided, the match may come from the full
+    ``physics_weight_all_runs.csv`` table so callers can target any completed
+    Step 2 configuration, not only the saved representative subset.
+    """
+
+    step2_root = step2_root.expanduser().resolve()
+    rep_csv = step2_root / "representative_configurations.csv"
+    explicit = any(value is not None for value in (lambda_q, lambda_k, lambda_delta))
+    if not explicit:
+        return resolve_dc_representative_row(rep_csv)
+    if None in {lambda_q, lambda_k, lambda_delta}:
+        raise ValueError(
+            "To select an explicit Step 2 configuration, provide all of "
+            "--lambda-q, --lambda-k, and --lambda-delta."
+        )
+    rows = load_dc_all_run_rows(step2_root)
+    matches = [
+        row
+        for row in rows
+        if str(row.get("model_family", "")).strip() == "gnn"
+        and _float_matches(row.get("lambda_q"), float(lambda_q))
+        and _float_matches(row.get("lambda_k"), float(lambda_k))
+        and _float_matches(row.get("lambda_delta"), float(lambda_delta))
+    ]
+    if not matches:
+        raise ValueError(
+            "No DC Step 2 GNN run matches "
+            f"(lambda_q={lambda_q}, lambda_k={lambda_k}, lambda_delta={lambda_delta}) "
+            f"in {(step2_root / 'physics_weight_all_runs.csv').resolve()}."
+        )
+    matches.sort(
+        key=lambda row: (
+            _safe_float(row.get("pareto_rank")),
+            _euclidean_error(row),
+            str(row.get("run_name", "")),
+        )
+    )
+    return matches[0]
 
 
 def resolve_balanced_dc_run_dir(step2_root: Path, explicit_run_dir: Path | None = None) -> Path:
@@ -131,9 +198,8 @@ def resolve_dc_run_dir(
         return explicit_run_dir.expanduser().resolve()
 
     step2_root = step2_root.expanduser().resolve()
-    rep_csv = step2_root / "representative_configurations.csv"
-    chosen = resolve_dc_representative_row(
-        rep_csv,
+    chosen = resolve_dc_step2_row(
+        step2_root,
         lambda_q=lambda_q,
         lambda_k=lambda_k,
         lambda_delta=lambda_delta,
@@ -145,7 +211,5 @@ def resolve_dc_run_dir(
 
     run_name = str(chosen.get("run_name", "")).strip()
     if not run_name:
-        raise ValueError(
-            f"Representative in {rep_csv} is missing both run_dir and run_name."
-        )
+        raise ValueError(f"Resolved Step 2 row in {step2_root} is missing both run_dir and run_name.")
     return (step2_root / "gnn" / run_name).resolve()

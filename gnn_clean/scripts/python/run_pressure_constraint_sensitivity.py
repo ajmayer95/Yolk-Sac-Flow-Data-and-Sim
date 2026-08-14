@@ -30,7 +30,7 @@ from pressure_constraint_sensitivity_lib import (
     representative_label,
 )
 from utils import load_yaml, write_yaml
-from workflow_selection import resolve_dc_representative_row
+from workflow_selection import resolve_dc_representative_row, resolve_dc_step2_row
 
 
 GNN_SCRIPT = PROJECT_ROOT / "scripts" / "python" / "gnn_flow.py"
@@ -131,8 +131,9 @@ def select_representatives(args: argparse.Namespace, reps: pd.DataFrame) -> pd.D
         value is not None for value in (args.lambda_q, args.lambda_k, args.lambda_delta)
     )
     if explicit_lambda:
-        row = resolve_dc_representative_row(
-            args.representative_csv,
+        step2_root = args.representative_csv.expanduser().resolve().parent
+        row = resolve_dc_step2_row(
+            step2_root,
             lambda_q=args.lambda_q,
             lambda_k=args.lambda_k,
             lambda_delta=args.lambda_delta,
@@ -140,7 +141,7 @@ def select_representatives(args: argparse.Namespace, reps: pd.DataFrame) -> pd.D
         selected = reps[reps["run_name"].astype(str) == str(row.get("run_name", ""))].copy()
         if selected.empty:
             raise ValueError(
-                "Resolved Step 2 representative run is missing from the loaded representative table."
+                "Resolved Step 2 run is missing from the loaded representative table."
             )
         return selected
 

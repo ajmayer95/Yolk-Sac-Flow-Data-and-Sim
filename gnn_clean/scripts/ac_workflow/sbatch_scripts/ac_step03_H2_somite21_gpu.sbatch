@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 #SBATCH --time=24:00:00
-#SBATCH --array=0-458%8
+#SBATCH --array=0-458%16
 #SBATCH --output=logs/ac_step03_H2_somite21_gpu.%A_%a.out
 
 set -euo pipefail

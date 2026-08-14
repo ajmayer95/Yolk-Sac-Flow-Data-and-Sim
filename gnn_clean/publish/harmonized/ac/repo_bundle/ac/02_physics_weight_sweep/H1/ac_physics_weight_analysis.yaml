@@ -1,0 +1,8 @@
+{
+  "input_root": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_harmonized/ac/02_physics_weight_sweep_q10_k10_delta0p1/H1",
+  "n_all_rows": 48,
+  "n_representatives": 36,
+  "representative_count_per_regime": 4,
+  "all_runs_csv": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_harmonized/ac/02_physics_weight_sweep_q10_k10_delta0p1/H1/ac_physics_weight_all_runs.csv",
+  "representatives_csv": "/mnt/home/sswee/yolk/Yolk-Sac-Flow-Data-and-Sim/gnn_clean/outputs_harmonized/ac/02_physics_weight_sweep_q10_k10_delta0p1/H1/ac_physics_weight_representatives.csv"
+}

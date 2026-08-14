@@ -46,13 +46,13 @@ def transform_mosaic_coords(
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Rotate the mosaic the opposite way from the previous Step 4 update."""
+    """Rotate the mosaic 90 degrees clockwise."""
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    x_min, _ = x_bounds
+    x_min, x_max = x_bounds
     y_min, _ = y_bounds
-    transformed_x = x_arr - x_min
-    transformed_y = y_arr - y_min
+    transformed_x = y_arr - y_min
+    transformed_y = (x_max - x_min) - (x_arr - x_min)
     return transformed_x, transformed_y
 
 
@@ -125,8 +125,8 @@ def plot_pressure_maps(run_dirs: dict[int, Path], path: Path, dpi: int) -> None:
     vmin, vmax = limits
     xlim = (min(xmins), max(xmaxs))
     ylim = (min(ymins), max(ymaxs))
-    transformed_xlim = (0.0, xlim[1] - xlim[0])
-    transformed_ylim = (0.0, ylim[1] - ylim[0])
+    transformed_xlim = (0.0, ylim[1] - ylim[0])
+    transformed_ylim = (0.0, xlim[1] - xlim[0])
     fig, axes = plt.subplots(1, len(K_VALUES), figsize=(3.1 * len(K_VALUES), 3.8), constrained_layout=True)
     scatter = None
     for ax, (k_value, nodes, edges) in zip(axes, payloads):
@@ -178,8 +178,8 @@ def plot_delta_maps(run_dirs: dict[int, Path], path: Path, dpi: int) -> None:
         ymaxs.append(coords["y_px"].max())
     xlim = (min(xmins), max(xmaxs))
     ylim = (min(ymins), max(ymaxs))
-    transformed_xlim = (0.0, xlim[1] - xlim[0])
-    transformed_ylim = (0.0, ylim[1] - ylim[0])
+    transformed_xlim = (0.0, ylim[1] - ylim[0])
+    transformed_ylim = (0.0, xlim[1] - xlim[0])
     fig, axes = plt.subplots(1, len(K_VALUES), figsize=(3.1 * len(K_VALUES), 3.8), constrained_layout=True)
     collection = None
     for ax, (k_value, nodes, edges) in zip(axes, payloads):
@@ -254,8 +254,8 @@ def plot_flow_residual_maps(run_dirs: dict[int, Path], path: Path, dpi: int) -> 
     vmin, vmax = limits
     xlim = (min(xmins), max(xmaxs))
     ylim = (min(ymins), max(ymaxs))
-    transformed_xlim = (0.0, xlim[1] - xlim[0])
-    transformed_ylim = (0.0, ylim[1] - ylim[0])
+    transformed_xlim = (0.0, ylim[1] - ylim[0])
+    transformed_ylim = (0.0, xlim[1] - xlim[0])
     fig, axes = plt.subplots(1, len(K_VALUES), figsize=(3.1 * len(K_VALUES), 3.8), constrained_layout=True)
     collection = None
     for ax, (k_value, nodes, edges) in zip(axes, payloads):
@@ -331,8 +331,8 @@ def plot_kirchhoff_residual_maps(run_dirs: dict[int, Path], path: Path, dpi: int
     vmin, vmax = limits
     xlim = (min(xmins), max(xmaxs))
     ylim = (min(ymins), max(ymaxs))
-    transformed_xlim = (0.0, xlim[1] - xlim[0])
-    transformed_ylim = (0.0, ylim[1] - ylim[0])
+    transformed_xlim = (0.0, ylim[1] - ylim[0])
+    transformed_ylim = (0.0, xlim[1] - xlim[0])
     fig, axes = plt.subplots(1, len(K_VALUES), figsize=(3.1 * len(K_VALUES), 3.8), constrained_layout=True)
     scatter = None
     for ax, (k_value, nodes, edges) in zip(axes, payloads):

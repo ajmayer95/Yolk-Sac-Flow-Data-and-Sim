@@ -75,6 +75,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument(
+        "--representative-field-orientation",
+        choices=("default", "cw90"),
+        default="default",
+        help="Orientation to use for representative field mosaics.",
+    )
+    parser.add_argument(
         "--clean-obsolete",
         action="store_true",
         help="Remove obsolete annotated/PDF plotting outputs before writing new PNG files.",
@@ -647,30 +653,6 @@ def plot_tradeoff_fit_curve(
     )
 
 
-def plot_smooth_loglog_fit_curve(
-    ax: plt.Axes,
-    df: pd.DataFrame,
-    x: str,
-    y: str,
-    *,
-    color: str,
-    linestyle: str,
-) -> None:
-    fit = build_smooth_loglog_curve(df, x, y)
-    if fit is None:
-        return
-    x_fit, y_fit = fit
-    ax.plot(
-        x_fit,
-        y_fit,
-        color=color,
-        linewidth=1.8,
-        linestyle=linestyle,
-        alpha=0.9,
-        zorder=2.6,
-    )
-
-
 def plot_poiseuille(ax: plt.Axes, pois_df: pd.DataFrame, x: str, y: str) -> None:
     if pois_df.empty:
         return
@@ -844,13 +826,16 @@ def plot_pareto_with_tradeoff_fit(
         fit_subset="pareto",
         loss_mode="absolute",
     )
-    plot_smooth_loglog_fit_curve(
+    plot_tradeoff_fit_curve(
         ax,
         pois_df,
         "flow_rmse_nl_s",
         "kirchhoff_rms_per_internal_node_nl_s",
+        x_domain=scatter_xlim,
         color="#5f5f5f",
         linestyle=":",
+        fit_subset="all",
+        loss_mode="log",
     )
     plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
     ax.set_xlim(scatter_xlim)
@@ -898,13 +883,16 @@ def plot_pareto_with_tradeoff_fit_all_configs(
         fit_subset="pareto",
         loss_mode="absolute",
     )
-    plot_smooth_loglog_fit_curve(
+    plot_tradeoff_fit_curve(
         ax,
         pois_df,
         "flow_rmse_nl_s",
         "kirchhoff_rms_per_internal_node_nl_s",
+        x_domain=scatter_xlim,
         color="#5f5f5f",
         linestyle=":",
+        fit_subset="all",
+        loss_mode="log",
     )
     plot_poiseuille(ax, pois_df, "flow_rmse_nl_s", "kirchhoff_rms_per_internal_node_nl_s")
     ax.set_xlim(scatter_xlim)
@@ -1035,29 +1023,56 @@ def transform_mosaic_coords(
     y: pd.Series | np.ndarray,
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
+    *,
+    orientation: str = "default",
 ) -> tuple[np.ndarray, np.ndarray]:
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
     x_min, _ = x_bounds
     y_min, _ = y_bounds
-    return x_arr - x_min, y_arr - y_min
+    tx = x_arr - x_min
+    ty = y_arr - y_min
+    if orientation == "cw90":
+        width = float(x_bounds[1] - x_bounds[0])
+        return ty, width - tx
+    return tx, ty
 
 
 def transform_segments(
     segments: list[np.ndarray],
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
+    *,
+    orientation: str = "default",
 ) -> list[np.ndarray]:
     transformed: list[np.ndarray] = []
     for segment in segments:
-        tx, ty = transform_mosaic_coords(segment[:, 0], segment[:, 1], x_bounds, y_bounds)
+        tx, ty = transform_mosaic_coords(
+            segment[:, 0],
+            segment[:, 1],
+            x_bounds,
+            y_bounds,
+            orientation=orientation,
+        )
         transformed.append(np.column_stack([tx, ty]))
     return transformed
 
 
-def decorate_field_axes(ax: plt.Axes, x_bounds: tuple[float, float], y_bounds: tuple[float, float]) -> None:
-    ax.set_xlim((0.0, x_bounds[1] - x_bounds[0]))
-    ax.set_ylim((0.0, y_bounds[1] - y_bounds[0]))
+def decorate_field_axes(
+    ax: plt.Axes,
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+    *,
+    orientation: str = "default",
+) -> None:
+    width = float(x_bounds[1] - x_bounds[0])
+    height = float(y_bounds[1] - y_bounds[0])
+    if orientation == "cw90":
+        ax.set_xlim((0.0, height))
+        ax.set_ylim((0.0, width))
+    else:
+        ax.set_xlim((0.0, width))
+        ax.set_ylim((0.0, height))
     ax.set_aspect("equal")
 
 
@@ -1095,13 +1110,39 @@ def draw_boundary_markers_field(
     nodes: pd.DataFrame,
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
+    *,
+    orientation: str = "default",
 ) -> None:
     arterial = nodes[nodes["is_arterial"].astype(str).str.lower().isin({"true", "1", "yes"})] if "is_arterial" in nodes.columns else nodes.iloc[0:0]
     venous = nodes[nodes["is_venous"].astype(str).str.lower().isin({"true", "1", "yes"})] if "is_venous" in nodes.columns else nodes.iloc[0:0]
     if not arterial.empty:
-        ax.scatter(*transform_mosaic_coords(arterial["x_px"], arterial["y_px"], x_bounds, y_bounds), marker="^", color="black", s=18, zorder=4)
+        ax.scatter(
+            *transform_mosaic_coords(
+                arterial["x_px"],
+                arterial["y_px"],
+                x_bounds,
+                y_bounds,
+                orientation=orientation,
+            ),
+            marker="^",
+            color="black",
+            s=18,
+            zorder=4,
+        )
     if not venous.empty:
-        ax.scatter(*transform_mosaic_coords(venous["x_px"], venous["y_px"], x_bounds, y_bounds), marker="s", color="black", s=16, zorder=4)
+        ax.scatter(
+            *transform_mosaic_coords(
+                venous["x_px"],
+                venous["y_px"],
+                x_bounds,
+                y_bounds,
+                orientation=orientation,
+            ),
+            marker="s",
+            color="black",
+            s=16,
+            zorder=4,
+        )
 
 
 def first_populated_numeric_column(df: pd.DataFrame, columns: list[str]) -> np.ndarray:
@@ -1126,10 +1167,23 @@ def load_field_tables(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return node_df, edge_df
 
 
-def plot_field_set(run_dir: Path, output_dir: Path, stem_prefix: str, title_prefix: str, dpi: int) -> None:
+def plot_field_set(
+    run_dir: Path,
+    output_dir: Path,
+    stem_prefix: str,
+    title_prefix: str,
+    dpi: int,
+    *,
+    orientation: str = "default",
+) -> None:
     nodes, edges = load_field_tables(run_dir)
     x_bounds, y_bounds = bounds_from_nodes(nodes)
-    segments = transform_segments(build_edge_segments(edges, nodes), x_bounds, y_bounds)
+    segments = transform_segments(
+        build_edge_segments(edges, nodes),
+        x_bounds,
+        y_bounds,
+        orientation=orientation,
+    )
     keep = np.asarray([np.isfinite(segment).all() for segment in segments], dtype=bool) if segments else np.asarray([], dtype=bool)
     segments = [segment for segment, ok in zip(segments, keep) if ok]
 
@@ -1155,8 +1209,8 @@ def plot_field_set(run_dir: Path, output_dir: Path, stem_prefix: str, title_pref
         ax.add_collection(collection)
         cbar = fig.colorbar(collection, ax=ax, shrink=0.88, pad=0.02)
         cbar.set_label("Predicted flow (nL/s)")
-    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
-    decorate_field_axes(ax, x_bounds, y_bounds)
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds, orientation=orientation)
+    decorate_field_axes(ax, x_bounds, y_bounds, orientation=orientation)
     save(fig, output_dir / f"{stem_prefix}_flow_field.png", dpi=dpi)
 
     fig, ax = field_axes(f"{title_prefix} Flow Amplitude")
@@ -1178,24 +1232,36 @@ def plot_field_set(run_dir: Path, output_dir: Path, stem_prefix: str, title_pref
         ax.add_collection(collection)
         cbar = fig.colorbar(collection, ax=ax, shrink=0.88, pad=0.02)
         cbar.set_label("Predicted flow amplitude |Q| (nL/s)")
-        node_x, node_y = transform_mosaic_coords(nodes["x_px"], nodes["y_px"], x_bounds, y_bounds)
+        node_x, node_y = transform_mosaic_coords(
+            nodes["x_px"],
+            nodes["y_px"],
+            x_bounds,
+            y_bounds,
+            orientation=orientation,
+        )
         ax.scatter(node_x, node_y, s=3, c="#5f5f5f", linewidths=0.0, zorder=3)
-    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
-    decorate_field_axes(ax, x_bounds, y_bounds)
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds, orientation=orientation)
+    decorate_field_axes(ax, x_bounds, y_bounds, orientation=orientation)
     save(fig, output_dir / f"{stem_prefix}_flow_amplitude_field.png", dpi=dpi)
 
     fig, ax = field_axes(f"{title_prefix} Pressure Field")
     if segments:
         ax.add_collection(LineCollection(segments, colors="#d0d0d0", linewidths=0.55, zorder=1))
-    node_x, node_y = transform_mosaic_coords(nodes["x_px"], nodes["y_px"], x_bounds, y_bounds)
+    node_x, node_y = transform_mosaic_coords(
+        nodes["x_px"],
+        nodes["y_px"],
+        x_bounds,
+        y_bounds,
+        orientation=orientation,
+    )
     scatter = ax.scatter(node_x, node_y, c=pressure_values, cmap="viridis", s=12, zorder=2)
     finite_pressure = pressure_values[np.isfinite(pressure_values)]
     if finite_pressure.size:
         scatter.set_clim(float(np.nanpercentile(finite_pressure, 2.5)), float(np.nanpercentile(finite_pressure, 97.5)))
     cbar = fig.colorbar(scatter, ax=ax, shrink=0.88, pad=0.02)
     cbar.set_label("Pressure [Pa]")
-    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
-    decorate_field_axes(ax, x_bounds, y_bounds)
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds, orientation=orientation)
+    decorate_field_axes(ax, x_bounds, y_bounds, orientation=orientation)
     save(fig, output_dir / f"{stem_prefix}_pressure_field.png", dpi=dpi)
 
     fig, ax = field_axes(f"{title_prefix} Correction Field")
@@ -1214,10 +1280,16 @@ def plot_field_set(run_dir: Path, output_dir: Path, stem_prefix: str, title_pref
         ax.add_collection(collection)
         cbar = fig.colorbar(collection, ax=ax, shrink=0.88, pad=0.02)
         cbar.set_label(r"Correction field $\delta_e$")
-        node_x, node_y = transform_mosaic_coords(nodes["x_px"], nodes["y_px"], x_bounds, y_bounds)
+        node_x, node_y = transform_mosaic_coords(
+            nodes["x_px"],
+            nodes["y_px"],
+            x_bounds,
+            y_bounds,
+            orientation=orientation,
+        )
         ax.scatter(node_x, node_y, s=3, c="#5f5f5f", linewidths=0.0, zorder=3)
-    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds)
-    decorate_field_axes(ax, x_bounds, y_bounds)
+    draw_boundary_markers_field(ax, nodes, x_bounds, y_bounds, orientation=orientation)
+    decorate_field_axes(ax, x_bounds, y_bounds, orientation=orientation)
     save(fig, output_dir / f"{stem_prefix}_correction_field.png", dpi=dpi)
 
 
@@ -1231,14 +1303,21 @@ def select_poiseuille_baseline_row(pois_df: pd.DataFrame) -> pd.Series:
     return pois_df.iloc[0]
 
 
-def plot_representative_field_sets(rep_df: pd.DataFrame, pois_df: pd.DataFrame, output_dir: Path, dpi: int) -> None:
+def plot_representative_field_sets(
+    rep_df: pd.DataFrame,
+    pois_df: pd.DataFrame,
+    output_dir: Path,
+    dpi: int,
+    *,
+    orientation: str = "default",
+) -> None:
     field_dir = output_dir / "representative_fields"
     wanted = {"F1", "B1", "K1", "C1"}
     selected = rep_df[rep_df["plot_label"].astype(str).isin(wanted)].copy()
     for _, row in selected.iterrows():
         run_dir = Path(str(row["output_dir"])).expanduser().resolve()
         label = str(row["plot_label"])
-        plot_field_set(run_dir, field_dir, label, label, dpi)
+        plot_field_set(run_dir, field_dir, label, label, dpi, orientation=orientation)
     if not pois_df.empty and "output_dir" in pois_df.columns:
         baseline_row = select_poiseuille_baseline_row(pois_df)
         plot_field_set(
@@ -1247,6 +1326,7 @@ def plot_representative_field_sets(rep_df: pd.DataFrame, pois_df: pd.DataFrame, 
             "poiseuille_baseline",
             "Poiseuille Baseline",
             dpi,
+            orientation=orientation,
         )
 
 
@@ -1391,7 +1471,13 @@ def main() -> None:
         title="Conservation error versus relative flow-conservation weighting by correction weight",
         filename="kirchhoff_rms_vs_log_lambda_q_over_k_by_delta.png",
     )
-    plot_representative_field_sets(rep_prepped, pois_summary, paths["output_dir"], args.dpi)
+    plot_representative_field_sets(
+        rep_prepped,
+        pois_summary,
+        paths["output_dir"],
+        args.dpi,
+        orientation=str(args.representative_field_orientation),
+    )
 
 
 if __name__ == "__main__":

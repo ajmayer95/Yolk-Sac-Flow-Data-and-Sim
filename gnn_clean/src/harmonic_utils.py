@@ -126,6 +126,24 @@ def edge_distensibility_values(
 
 
 def signed_measurement_phasor_nl_s(edge_data: dict, u, v, harmonic_number: int, global_f0_hz: float) -> tuple[complex, bool, float]:
+    bc_harmonics = edge_data.get("bc_harmonics")
+    if bc_harmonics is not None:
+        try:
+            bc_array = np.asarray(bc_harmonics, dtype=np.complex128).reshape(-1)
+        except Exception:
+            bc_array = np.asarray([], dtype=np.complex128)
+        if harmonic_number >= 1 and bc_array.size > harmonic_number:
+            phasor = complex(bc_array[harmonic_number])
+            if np.isfinite(phasor.real) and np.isfinite(phasor.imag):
+                flow_from = edge_data.get("flow_from")
+                flow_to = edge_data.get("flow_to")
+                sign = 1.0
+                if flow_from == v and flow_to == u:
+                    sign = -1.0
+                elif flow_from == u and flow_to == v:
+                    sign = 1.0
+                return complex(sign * phasor), True, float(global_f0_hz)
+
     amp = safe_float(edge_data.get(f"amp_Q_h{harmonic_number}_piv"))
     if not math.isfinite(amp):
         amp = safe_float(edge_data.get("amp_Q_piv" if harmonic_number == 1 else f"amp_Q_h{harmonic_number}"))
@@ -347,9 +365,47 @@ def solve_real_stacked_dense_lstsq(
     if backend == "torch":
         if not (bool(torch.all(torch.isfinite(real_matrix_t))) and bool(torch.all(torch.isfinite(real_rhs_t)))):
             raise ValueError("non-finite entries detected in real-stacked least-squares system")
-        # Use CPU Torch lstsq so we can rely on rank-revealing drivers instead of the
-        # GPU-only full-rank `gels` path, which can collapse to the trivial solution
-        # on the gauge-singular real-stacked harmonic system.
+        rhs_norm_reference = float(torch.linalg.vector_norm(real_rhs_t).detach().cpu())
+        if real_matrix_t.device.type == "cuda":
+            real_matrix_gpu = real_matrix_t.to(dtype=torch.float64)
+            real_rhs_gpu = real_rhs_t.to(dtype=torch.float64)
+            try:
+                lstsq_result_gpu = torch.linalg.lstsq(real_matrix_gpu, real_rhs_gpu)
+                solution_real_gpu = lstsq_result_gpu.solution
+                residual_gpu = real_matrix_gpu @ solution_real_gpu - real_rhs_gpu
+                residual_norm_gpu = float(torch.linalg.vector_norm(residual_gpu).detach().cpu())
+                relative_residual_gpu = residual_norm_gpu / max(rhs_norm_reference, 1.0e-30)
+                if bool(torch.all(torch.isfinite(solution_real_gpu))) and math.isfinite(relative_residual_gpu):
+                    solution_real = solution_real_gpu.detach().cpu().numpy().astype(np.float64, copy=False)
+                    half = solution_real.size // 2
+                    solution_complex = solution_real[:half] + 1j * solution_real[half:]
+                    singular_values_t = lstsq_result_gpu.singular_values
+                    singular_values = (
+                        singular_values_t.detach().cpu().numpy().astype(np.float64, copy=False)
+                        if singular_values_t is not None
+                        else np.asarray([], dtype=np.float64)
+                    )
+                    rank = _extract_lstsq_rank(lstsq_result_gpu.rank)
+                    sigma_max = float(np.max(singular_values)) if np.size(singular_values) else float("nan")
+                    sigma_min = float(np.min(singular_values)) if np.size(singular_values) else float("nan")
+                    info: dict[str, float | int | bool | str] = {
+                        "backend": "torch_linalg_lstsq_real_stacked_cuda",
+                        "istop": float("nan"),
+                        "iterations": float("nan"),
+                        "r1norm": residual_norm_gpu,
+                        "r2norm": residual_norm_gpu,
+                        "anorm": sigma_max,
+                        "acond": float(sigma_max / sigma_min) if sigma_min > 0.0 and math.isfinite(sigma_max) and math.isfinite(sigma_min) else float("nan"),
+                        "arnorm": float("nan"),
+                        "xnorm": float(torch.linalg.vector_norm(solution_real_gpu).detach().cpu()),
+                        "rank": rank,
+                        "success": True,
+                        "relative_residual": relative_residual_gpu,
+                    }
+                    return solution_complex.astype(np.complex128, copy=False), info
+            except RuntimeError:
+                pass
+        # Fallback path: use CPU Torch lstsq with a rank-revealing driver.
         real_matrix_solve = real_matrix_t.to(device="cpu", dtype=torch.float64)
         real_rhs_solve = real_rhs_t.to(device="cpu", dtype=torch.float64)
         lstsq_result = torch.linalg.lstsq(real_matrix_solve, real_rhs_solve, driver="gelsd")
@@ -365,10 +421,10 @@ def solve_real_stacked_dense_lstsq(
             if singular_values_t is not None
             else np.asarray([], dtype=np.float64)
         )
-        rank = int(lstsq_result.rank.detach().cpu()) if lstsq_result.rank is not None else -1
+        rank = _extract_lstsq_rank(lstsq_result.rank)
         sigma_max = float(np.max(singular_values)) if np.size(singular_values) else float("nan")
         sigma_min = float(np.min(singular_values)) if np.size(singular_values) else float("nan")
-        info: dict[str, float | int | bool | str] = {
+        info = {
             "backend": "torch_linalg_lstsq_real_stacked_cpu_gelsd",
             "istop": float("nan"),
             "iterations": float("nan"),
@@ -380,6 +436,7 @@ def solve_real_stacked_dense_lstsq(
             "xnorm": float(torch.linalg.vector_norm(solution_real_t).detach().cpu()),
             "rank": rank,
             "success": True,
+            "relative_residual": residual_norm / max(rhs_norm_reference, 1.0e-30),
         }
         return solution_complex.astype(np.complex128, copy=False), info
     if backend != "numpy":
@@ -410,6 +467,14 @@ def solve_real_stacked_dense_lstsq(
     return solution_complex.astype(np.complex128, copy=False), info
 
 
+def _extract_lstsq_rank(rank_tensor: torch.Tensor | None) -> int:
+    if rank_tensor is None:
+        return -1
+    rank_flat = rank_tensor.detach().reshape(-1)
+    if rank_flat.numel() == 0:
+        return -1
+    return int(rank_flat[0].item())
+
 
 def solve_real_dense_lstsq_system(
     real_matrix: torch.Tensor,
@@ -433,19 +498,56 @@ def solve_real_dense_lstsq_system(
     rhs_cpu = real_rhs.to(device="cpu", dtype=torch.float64)
 
     if backend == "torch":
-        result = torch.linalg.lstsq(matrix_cpu, rhs_cpu, driver="gelsd")
-        solution_real_t = result.solution
-        residual_t = matrix_cpu @ solution_real_t - rhs_cpu
-        singular_values_t = result.singular_values
-        singular_values = (
-            singular_values_t.detach().cpu().numpy().astype(np.float64, copy=False)
-            if singular_values_t is not None
-            else np.asarray([], dtype=np.float64)
-        )
-        rank = int(result.rank.detach().cpu()) if result.rank is not None else -1
-        solution_real = solution_real_t.detach().cpu().numpy().astype(np.float64, copy=False)
-        residual_norm = float(torch.linalg.vector_norm(residual_t).detach().cpu())
-        backend_name = "torch_linalg_lstsq_real_mixed_cpu_gelsd"
+        rhs_norm_reference = float(torch.linalg.vector_norm(real_rhs).detach().cpu())
+        if real_matrix.device.type == "cuda":
+            matrix_gpu = real_matrix.to(dtype=torch.float64)
+            rhs_gpu = real_rhs.to(dtype=torch.float64)
+            try:
+                result_gpu = torch.linalg.lstsq(matrix_gpu, rhs_gpu)
+                solution_real_t = result_gpu.solution
+                residual_t = matrix_gpu @ solution_real_t - rhs_gpu
+                residual_norm = float(torch.linalg.vector_norm(residual_t).detach().cpu())
+                relative_residual = residual_norm / max(rhs_norm_reference, 1.0e-30)
+                if bool(torch.all(torch.isfinite(solution_real_t))) and math.isfinite(relative_residual):
+                    singular_values_t = result_gpu.singular_values
+                    singular_values = (
+                        singular_values_t.detach().cpu().numpy().astype(np.float64, copy=False)
+                        if singular_values_t is not None
+                        else np.asarray([], dtype=np.float64)
+                    )
+                    rank = _extract_lstsq_rank(result_gpu.rank)
+                    solution_real = solution_real_t.detach().cpu().numpy().astype(np.float64, copy=False)
+                    backend_name = "torch_linalg_lstsq_real_mixed_cuda"
+                else:
+                    raise RuntimeError("CUDA lstsq returned non-finite values.")
+            except RuntimeError:
+                result = torch.linalg.lstsq(matrix_cpu, rhs_cpu, driver="gelsd")
+                solution_real_t = result.solution
+                residual_t = matrix_cpu @ solution_real_t - rhs_cpu
+                singular_values_t = result.singular_values
+                singular_values = (
+                    singular_values_t.detach().cpu().numpy().astype(np.float64, copy=False)
+                    if singular_values_t is not None
+                    else np.asarray([], dtype=np.float64)
+                )
+                rank = _extract_lstsq_rank(result.rank)
+                solution_real = solution_real_t.detach().cpu().numpy().astype(np.float64, copy=False)
+                residual_norm = float(torch.linalg.vector_norm(residual_t).detach().cpu())
+                backend_name = "torch_linalg_lstsq_real_mixed_cpu_gelsd"
+        else:
+            result = torch.linalg.lstsq(matrix_cpu, rhs_cpu, driver="gelsd")
+            solution_real_t = result.solution
+            residual_t = matrix_cpu @ solution_real_t - rhs_cpu
+            singular_values_t = result.singular_values
+            singular_values = (
+                singular_values_t.detach().cpu().numpy().astype(np.float64, copy=False)
+                if singular_values_t is not None
+                else np.asarray([], dtype=np.float64)
+            )
+            rank = _extract_lstsq_rank(result.rank)
+            solution_real = solution_real_t.detach().cpu().numpy().astype(np.float64, copy=False)
+            residual_norm = float(torch.linalg.vector_norm(residual_t).detach().cpu())
+            backend_name = "torch_linalg_lstsq_real_mixed_cpu_gelsd"
     elif backend == "numpy":
         matrix_np = matrix_cpu.detach().cpu().numpy().astype(np.float64, copy=False)
         rhs_np = rhs_cpu.detach().cpu().numpy().astype(np.float64, copy=False)
@@ -468,8 +570,19 @@ def solve_real_dense_lstsq_system(
         raise ValueError("real pressure solution must contain equal real and imaginary halves")
     solution_complex = solution_real[:half] + 1j * solution_real[half:]
 
+    singular_values = np.asarray(singular_values, dtype=np.float64)
     sigma_max = float(np.max(singular_values)) if np.size(singular_values) else float("nan")
     sigma_min = float(np.min(singular_values)) if np.size(singular_values) else float("nan")
+    nonzero_threshold = (
+        float(np.finfo(np.float64).eps) * max(matrix_cpu.shape) * sigma_max
+        if np.size(singular_values) and math.isfinite(sigma_max)
+        else float("nan")
+    )
+    finite_nonzero = (
+        singular_values[np.isfinite(singular_values) & (singular_values > max(nonzero_threshold, 0.0))]
+        if np.size(singular_values)
+        else np.asarray([], dtype=np.float64)
+    )
     info: dict[str, float | int | bool | str] = {
         "backend": backend_name,
         "istop": float("nan"),
@@ -486,8 +599,49 @@ def solve_real_dense_lstsq_system(
         "xnorm": float(np.linalg.norm(solution_real)),
         "rank": int(rank),
         "success": True,
+        "singular_values_desc": singular_values.tolist(),
+        "smallest_singular_values": singular_values[-10:].tolist() if np.size(singular_values) else [],
+        "largest_singular_values": singular_values[:10].tolist() if np.size(singular_values) else [],
+        "smallest_nonzero_singular_value": (
+            float(finite_nonzero[-1]) if finite_nonzero.size else float("nan")
+        ),
+        "nonzero_singular_value_count": int(finite_nonzero.size),
+        "relative_residual": residual_norm / max(
+            float(torch.linalg.vector_norm(real_rhs).detach().cpu()),
+            1.0e-30,
+        ),
     }
     return solution_complex.astype(np.complex128, copy=False), info
+
+
+def summarize_magnitude_stats(values: np.ndarray, *, nonzero_only: bool = False) -> dict[str, float]:
+    mags = np.abs(np.asarray(values))
+    finite = mags[np.isfinite(mags)]
+    if nonzero_only:
+        finite = finite[finite > 0.0]
+    if finite.size == 0:
+        return {"min": float("nan"), "median": float("nan"), "max": float("nan")}
+    return {
+        "min": float(np.min(finite)),
+        "median": float(np.median(finite)),
+        "max": float(np.max(finite)),
+    }
+
+
+def block_diagnostics(matrix: np.ndarray, rhs: np.ndarray, *, weight_sqrt: float, normalization_scale: float) -> dict[str, object]:
+    matrix_np = np.asarray(matrix)
+    rhs_np = np.asarray(rhs)
+    matrix_abs = np.abs(matrix_np)
+    rhs_abs = np.abs(rhs_np)
+    return {
+        "shape": [int(dim) for dim in matrix_np.shape],
+        "fro_norm": float(np.linalg.norm(matrix_np)),
+        "max_abs_entry": float(np.max(matrix_abs)) if matrix_abs.size else 0.0,
+        "rhs_norm": float(np.linalg.norm(rhs_np)),
+        "rhs_max_abs_entry": float(np.max(rhs_abs)) if rhs_abs.size else 0.0,
+        "weight_sqrt": float(weight_sqrt),
+        "normalization_scale": float(normalization_scale),
+    }
 
 
 def common_phase_rad(pressures: np.ndarray, arterial_idx: np.ndarray) -> float:
@@ -564,6 +718,7 @@ def _build_source_driven_base_blocks(
     flow_matrix: torch.Tensor,
     q_obs_t: torch.Tensor | None,
     flow_rows: np.ndarray | None,
+    flow_row_weights_t: torch.Tensor | None,
     lambda_k: float,
     lambda_q: float,
     dtype: torch.dtype,
@@ -601,10 +756,16 @@ def _build_source_driven_base_blocks(
             else torch.tensor(1.0, dtype=torch.float64, device=device)
         )
         flow_scale_value = float(flow_scale.detach().cpu())
-        blocks.append(math.sqrt(lambda_q) * (flow_block / flow_scale.to(dtype)))
+        weighted_flow_block = flow_block / flow_scale.to(dtype)
+        weighted_flow_rhs = q_obs_t.index_select(0, flow_rows_t) / flow_scale.to(dtype)
+        if flow_row_weights_t is not None:
+            row_weights = flow_row_weights_t.index_select(0, flow_rows_t).to(dtype=torch.float64, device=device)
+            row_sqrt = torch.sqrt(row_weights.clamp_min(1.0e-12)).to(dtype).unsqueeze(1)
+            weighted_flow_block = weighted_flow_block * row_sqrt
+            weighted_flow_rhs = weighted_flow_rhs * row_sqrt.squeeze(1)
+        blocks.append(math.sqrt(lambda_q) * weighted_flow_block)
         rhs_blocks.append(
-            math.sqrt(lambda_q)
-            * (q_obs_t.index_select(0, flow_rows_t) / flow_scale.to(dtype))
+            math.sqrt(lambda_q) * weighted_flow_rhs
         )
 
     return blocks, rhs_blocks, laplacian_scale_value, flow_scale_value
@@ -617,6 +778,7 @@ def _solve_source_driven_with_phase_only_constraint(
     source_t: torch.Tensor,
     q_obs_t: torch.Tensor | None,
     flow_rows: np.ndarray | None,
+    flow_row_weights_t: torch.Tensor | None,
     arterial_idx: np.ndarray,
     lambda_k: float,
     lambda_q: float,
@@ -643,6 +805,7 @@ def _solve_source_driven_with_phase_only_constraint(
             flow_matrix=flow_matrix,
             q_obs_t=q_obs_t,
             flow_rows=flow_rows,
+            flow_row_weights_t=flow_row_weights_t,
             lambda_k=float(lambda_k),
             lambda_q=float(lambda_q),
             dtype=dtype,
@@ -691,8 +854,30 @@ def _solve_source_driven_with_phase_only_constraint(
         "laplacian_scale": laplacian_scale,
         "flow_scale": flow_scale,
         "initialization": "unconstrained_kirchhoff_flow_lstsq",
+        "block_diagnostics": {},
     }
+    block_info = dict(solver_info["block_diagnostics"])
+    if lambda_k > 0.0:
+        kirchhoff_matrix = base_blocks[0].detach().cpu().numpy().astype(np.complex128, copy=False)
+        kirchhoff_rhs = base_rhs_blocks[0].detach().cpu().numpy().astype(np.complex128, copy=False)
+        block_info["kirchhoff_source_block"] = block_diagnostics(
+            kirchhoff_matrix,
+            kirchhoff_rhs,
+            weight_sqrt=math.sqrt(lambda_k),
+            normalization_scale=laplacian_scale,
+        )
+    if lambda_q > 0.0 and q_obs_t is not None and flow_rows is not None and flow_rows.size > 0:
+        flow_matrix_block = base_blocks[-1].detach().cpu().numpy().astype(np.complex128, copy=False)
+        flow_rhs_block = base_rhs_blocks[-1].detach().cpu().numpy().astype(np.complex128, copy=False)
+        block_info["edge_flow_fit_block"] = block_diagnostics(
+            flow_matrix_block,
+            flow_rhs_block,
+            weight_sqrt=math.sqrt(lambda_q),
+            normalization_scale=flow_scale,
+        )
+    solver_info["block_diagnostics"] = block_info
     final_real_matrix = base_real_matrix
+    final_real_rhs = base_real_rhs
 
     if lambda_b > 0.0 and arterial_idx.size > 0:
         converged = False
@@ -720,6 +905,7 @@ def _solve_source_driven_with_phase_only_constraint(
             delta = float(np.linalg.norm(new_pressure - pressure) / denom)
             pressure = new_pressure
             final_real_matrix = real_matrix
+            final_real_rhs = real_rhs
             solver_info.update(
                 {
                     "backend": str(ls_info.get("backend", solver_info["backend"])),
@@ -739,6 +925,14 @@ def _solve_source_driven_with_phase_only_constraint(
                     "phase_constraint_amplitude_floor_pa": amp_floor,
                 }
             )
+            phase_matrix_np = (math.sqrt(lambda_b) * phase_rows).detach().cpu().numpy().astype(np.float64, copy=False)
+            phase_rhs_np = (math.sqrt(lambda_b) * phase_rhs).detach().cpu().numpy().astype(np.float64, copy=False)
+            solver_info["block_diagnostics"]["arterial_phase_block"] = block_diagnostics(
+                phase_matrix_np,
+                phase_rhs_np,
+                weight_sqrt=math.sqrt(lambda_b),
+                normalization_scale=1.0,
+            )
             if delta <= float(tol):
                 converged = True
                 solver_info["message"] = "normalized phase-only iteration converged"
@@ -755,6 +949,9 @@ def _solve_source_driven_with_phase_only_constraint(
     final_matrix_np = (
         final_real_matrix.detach().cpu().numpy().astype(np.float64, copy=False)
     )
+    final_rhs_np = final_real_rhs.detach().cpu().numpy().astype(np.float64, copy=False)
+    ones_complex = np.ones(num_nodes, dtype=np.complex128)
+    ones_real = np.concatenate([np.ones(num_nodes, dtype=np.float64), np.zeros(num_nodes, dtype=np.float64)])
     solver_info["matrix_diagnostics"] = full_complex_matrix_diagnostics(
         final_matrix_np.astype(np.complex128),
         precomputed_rank=(
@@ -763,6 +960,41 @@ def _solve_source_driven_with_phase_only_constraint(
             else None
         ),
     )
+    solver_info["final_real_matrix_diagnostics"] = {
+        "shape": [int(dim) for dim in final_matrix_np.shape],
+        "fro_norm": float(np.linalg.norm(final_matrix_np)),
+        "max_abs_entry": float(np.max(np.abs(final_matrix_np))) if final_matrix_np.size else 0.0,
+        "rhs_norm": float(np.linalg.norm(final_rhs_np)),
+        "rhs_max_abs_entry": float(np.max(np.abs(final_rhs_np))) if final_rhs_np.size else 0.0,
+        "ones_response_norm": float(np.linalg.norm(final_matrix_np @ ones_real)),
+        "ones_response_max_abs": float(np.max(np.abs(final_matrix_np @ ones_real))) if final_matrix_np.size else 0.0,
+    }
+    solver_info["nullspace_diagnostics"] = {
+        "laplacian_times_ones_norm": float(
+            np.linalg.norm(
+                laplacian.detach().cpu().numpy().astype(np.complex128, copy=False) @ ones_complex
+            )
+        ),
+        "laplacian_times_ones_max_abs": float(
+            np.max(
+                np.abs(
+                    laplacian.detach().cpu().numpy().astype(np.complex128, copy=False) @ ones_complex
+                )
+            )
+        ),
+        "flow_matrix_times_ones_norm": float(
+            np.linalg.norm(
+                flow_matrix.detach().cpu().numpy().astype(np.complex128, copy=False) @ ones_complex
+            )
+        ),
+        "flow_matrix_times_ones_max_abs": float(
+            np.max(
+                np.abs(
+                    flow_matrix.detach().cpu().numpy().astype(np.complex128, copy=False) @ ones_complex
+                )
+            )
+        ),
+    }
 
     arterial = pressure[arterial_idx] if arterial_idx.size else np.zeros((0,), dtype=np.complex128)
     if arterial.size:
@@ -1102,6 +1334,7 @@ def solve_complex_pressure_with_nodal_injections_and_flow(
     edge_index: np.ndarray,
     q_obs_m3_s: np.ndarray,
     valid_edge_mask: np.ndarray,
+    flow_row_weights: np.ndarray | None,
     source_vector_m3_s: np.ndarray,
     arterial_idx: np.ndarray,
     lambda_q: float,
@@ -1140,6 +1373,11 @@ def solve_complex_pressure_with_nodal_injections_and_flow(
     )
     source_t = torch.as_tensor(source_vector_m3_s, dtype=dtype, device=device)
     q_obs_t = torch.as_tensor(q_obs_m3_s, dtype=dtype, device=device)
+    flow_row_weights_t = (
+        torch.as_tensor(flow_row_weights, dtype=torch.float64, device=device)
+        if flow_row_weights is not None
+        else None
+    )
     flow_rows = np.flatnonzero(np.asarray(valid_edge_mask, dtype=bool))
     use_phase_constraint = pressure_constraint_type in {
         "common_arterial_phase",
@@ -1152,6 +1390,7 @@ def solve_complex_pressure_with_nodal_injections_and_flow(
         source_t=source_t,
         q_obs_t=q_obs_t,
         flow_rows=flow_rows,
+        flow_row_weights_t=flow_row_weights_t,
         arterial_idx=np.asarray(arterial_idx, dtype=np.int64),
         lambda_k=float(lambda_k),
         lambda_q=float(lambda_q),

@@ -1,0 +1,13 @@
+representative_label,model_family,constraint_left,constraint_right,pressure_pearson_aligned
+B1,gnn,equal_av,equal_drop,0.9709682515599725
+B1,gnn,equal_av,fixed_drop_10pa,0.9780509307444976
+B1,gnn,equal_av,gauge_only,0.9850392706585522
+B1,gnn,equal_drop,fixed_drop_10pa,0.9584063627257425
+B1,gnn,equal_drop,gauge_only,0.9968073850414948
+B1,gnn,fixed_drop_10pa,gauge_only,0.9728010641740304
+,poiseuille_baseline,equal_av,equal_drop,0.9655834990400562
+,poiseuille_baseline,equal_av,fixed_drop_10pa,0.9187363410600821
+,poiseuille_baseline,equal_av,gauge_only,0.9554043778732759
+,poiseuille_baseline,equal_drop,fixed_drop_10pa,0.9097885172740022
+,poiseuille_baseline,equal_drop,gauge_only,0.9963424730683876
+,poiseuille_baseline,fixed_drop_10pa,gauge_only,0.8745940776959978
